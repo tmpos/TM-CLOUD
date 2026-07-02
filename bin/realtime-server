@@ -1,0 +1,19 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/../vendor/autoload.php';
+
+$config = require __DIR__ . '/../config/app.php';
+$rt = $config['realtime'];
+
+$dbPath = $config['database'];
+$wsPort = (int) ($rt['ws_port'] ?? 8080);
+$eventPort = (int) ($rt['event_port'] ?? 8081);
+
+echo "[Realtime] Booting realtime server...\n";
+echo "[Realtime] DB: $dbPath\n";
+echo "[Realtime] WS: port $wsPort, Event: port $eventPort\n";
+
+\App\WebSocket\RealtimeServer::start($dbPath, $wsPort, $eventPort);

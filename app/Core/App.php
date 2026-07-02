@@ -15,6 +15,7 @@ use App\Services\ProjectService;
 use App\Services\RecordService;
 use App\Services\SchemaService;
 use App\Services\StorageService;
+use App\Services\RealtimeService;
 use App\Services\WebhookService;
 use App\Services\LicenseService;
 use App\Services\DatabaseBridgeService;
@@ -34,7 +35,8 @@ final class App
         $transfer = new ImportExportService($records);
         $backups = new BackupService($db, $config, $logs);
         $storage = new StorageService($config, $schema, $logs);
-        $webhooks = new WebhookService($db);
+        $realtime = new RealtimeService($config['realtime'] ?? []);
+        $webhooks = new WebhookService($db, $realtime);
         $keys = new ApiKeyService($db, $schema, $config['rate_limit']);
         $auth = new Auth($db);
         $installer = new InstallerService($config, $auth);

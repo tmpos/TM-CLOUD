@@ -7,7 +7,8 @@
         "ext-fileinfo": "*",
         "ext-pdo": "*",
         "ext-pdo_sqlite": "*",
-        "flightphp/core": "^3.15"
+        "flightphp/core": "^3.15",
+        "cboden/ratchet": "^0.4"
     },
     "autoload": {
         "psr-4": {

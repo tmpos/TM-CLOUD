@@ -9,7 +9,7 @@ use PDO;
 
 final class WebhookService
 {
-    public function __construct(private PDO $db)
+    public function __construct(private PDO $db, private ?RealtimeService $realtime = null)
     {
     }
 
@@ -55,5 +55,7 @@ final class WebhookService
             ]]);
             @file_get_contents($webhook['url'], false, $context);
         }
+
+        $this->realtime?->broadcast($event, $project, $table, $record);
     }
 }

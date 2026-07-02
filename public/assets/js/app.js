@@ -29,7 +29,6 @@ document.querySelectorAll('[data-secret-toggle]').forEach(button => {
 });
 setTimeout(() => document.querySelectorAll('[data-toast]').forEach(el => el.remove()), 6000);
 
-// Bulk record selection
 const selectAllHeader = document.getElementById('select-all-header');
 const selectAll = document.getElementById('select-all');
 const rowCheckboxes = document.querySelectorAll('.row-checkbox');
@@ -71,11 +70,17 @@ if (deleteSelected && bulkForm) {
     });
 }
 
-// Auto-sync
 const autoSyncCheckbox = document.getElementById('auto-sync');
 const syncUrl = autoSyncCheckbox ? autoSyncCheckbox.dataset.syncUrl : '';
 const storageKey = autoSyncCheckbox ? 'tmpbase_autosync_' + autoSyncCheckbox.dataset.syncKey : '';
+const wsProject = autoSyncCheckbox ? autoSyncCheckbox.dataset.wsProject : '';
+const wsToken = autoSyncCheckbox ? autoSyncCheckbox.dataset.wsToken : '';
+const wsMeta = document.querySelector('meta[name="ws-url"]');
+const wsUrl = wsMeta ? wsMeta.getAttribute('content') : '';
+
 let syncInterval = null;
+let ws = null;
+let wsReconnectTimer = null;
 
 function getLastSync() {
     return localStorage.getItem(storageKey + '_last') || '';
@@ -95,25 +100,77 @@ function doSync() {
             if (res.server_time) setLastSync(res.server_time);
             const records = res.data || [];
             if (records.length > 0) {
-                const badge = document.getElementById('sync-badge');
-                if (badge) badge.textContent = records.length + ' new';
-                const tbody = document.querySelector('.data-table tbody');
-                if (tbody && !document.querySelector('[name="search"]')?.value) {
-                    location.reload();
-                }
+                showSyncBadge(records.length);
+                maybeReload();
             }
         })
         .catch(() => {});
 }
 
+function showSyncBadge(count) {
+    const badge = document.getElementById('sync-badge');
+    if (badge) badge.textContent = count + ' new';
+}
+
+function maybeReload() {
+    const tbody = document.querySelector('.data-table tbody');
+    if (tbody && !document.querySelector('[name="search"]')?.value) {
+        location.reload();
+    }
+}
+
+function connectWs() {
+    if (!wsUrl || !wsProject || !wsToken) return;
+    try {
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+            ws.send(JSON.stringify({ type: 'subscribe', project: wsProject, token: wsToken }));
+        };
+        ws.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'event') {
+                    showSyncBadge('Live');
+                    maybeReload();
+                }
+            } catch (e) {}
+        };
+        ws.onclose = () => {
+            ws = null;
+            if (autoSyncCheckbox?.checked) {
+                wsReconnectTimer = setTimeout(connectWs, 5000);
+            }
+        };
+        ws.onerror = () => {
+            ws?.close();
+        };
+    } catch (e) {
+        ws = null;
+    }
+}
+
+function disconnectWs() {
+    if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+    }
+    if (ws) {
+        ws.onclose = null;
+        ws.close();
+        ws = null;
+    }
+}
+
 function startSync() {
     stopSync();
+    connectWs();
     doSync();
     syncInterval = setInterval(doSync, 10000);
 }
 
 function stopSync() {
     if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
+    disconnectWs();
 }
 
 if (autoSyncCheckbox) {
