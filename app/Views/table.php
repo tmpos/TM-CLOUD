@@ -1,6 +1,18 @@
 <?php
 use App\Core\Csrf;
 
+function formatDateValue(string $value): string
+{
+    if (is_numeric($value) && strlen($value) >= 13) {
+        return date('d/m/Y H:i:s', (int) ($value / 1000));
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $value)) {
+        $dt = DateTime::createFromFormat('Y-m-d H:i:s', $value);
+        return $dt ? $dt->format('d/m/Y H:i:s') : $value;
+    }
+    return $value;
+}
+
 $editable = array_values(array_filter($columns, fn($c) => !$c['protected']));
 $endpoint = $baseUrl . '/api/' . $project['uid'] . '/' . $table;
 $columnNames = array_column($columns, 'name');
@@ -36,7 +48,7 @@ $queryUrl = static function (array $changes = []): string {
 </div>
 
 <div class="table-wrap"><table class="data-table"><thead><tr><th class="w-10"><input type="checkbox" id="select-all-header" class="accent-brand"></th><th class="w-28"></th><?php foreach ($columns as $column): ?><?php $isSorted = $orderBy === $column['name']; $nextDir = $isSorted && $orderDir === 'ASC' ? 'DESC' : 'ASC'; ?><th aria-sort="<?= $isSorted ? ($orderDir === 'ASC' ? 'ascending' : 'descending') : 'none' ?>"><a class="table-sort <?= $isSorted ? 'active' : '' ?>" href="<?= $queryUrl(['page' => 1, 'order_by' => $column['name'], 'order_dir' => $nextDir]) ?>" title="Sort <?= $nextDir === 'ASC' ? 'ascending' : 'descending' ?>"><?= e($column['name']) ?><span class="table-sort-icon" aria-hidden="true"><?= $isSorted ? ($orderDir === 'ASC' ? '&uarr;' : '&darr;') : '&harr;' ?></span></a></th><?php endforeach; ?></tr></thead><tbody>
-<?php foreach ($rows as $row): ?><tr><td><input form="bulk-form" type="checkbox" name="uids[]" value="<?= e($row['uid']) ?>" class="row-checkbox accent-brand"></td><td><div class="flex gap-1"><button class="btn-secondary text-xs px-2 py-1.5" data-dialog-open="#edit-<?= e($row['uid']) ?>">Edit</button><form method="post" data-confirm="Delete this record permanently?" action="/projects/<?= e($project['uid']) ?>/tables/<?= e($table) ?>/records/<?= e($row['uid']) ?>" class="inline"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><input type="hidden" name="_action" value="delete"><button class="btn-danger text-xs px-2 py-1.5">Del</button></form></div></td><?php foreach ($columns as $column): ?><?php $value = (string) ($row[$column['name']] ?? ''); $image = $uploadedImages[$value] ?? null; ?><td title="<?= e($value) ?>"><?php if ($image): ?><a href="<?= e($image['url']) ?>" target="_blank" rel="noopener" class="inline-block"><img src="<?= e($image['url']) ?>" alt="<?= e($image['original_name']) ?>" loading="lazy" class="h-16 w-16 rounded-lg border border-line object-cover"></a><?php else: ?><?= e($value) ?><?php endif; ?></td><?php endforeach; ?></tr><?php endforeach; ?>
+<?php foreach ($rows as $row): ?><tr><td><input form="bulk-form" type="checkbox" name="uids[]" value="<?= e($row['uid']) ?>" class="row-checkbox accent-brand"></td><td><div class="flex gap-1"><?php if ($table === 'facturas'): ?><a class="btn-primary text-xs px-2 py-1.5" href="/projects/<?= e($project['uid']) ?>/tables/facturas/<?= e($row['uid']) ?>/pdf" target="_blank">PDF</a><?php endif; ?><button class="btn-secondary text-xs px-2 py-1.5" data-dialog-open="#edit-<?= e($row['uid']) ?>">Edit</button><form method="post" data-confirm="Delete this record permanently?" action="/projects/<?= e($project['uid']) ?>/tables/<?= e($table) ?>/records/<?= e($row['uid']) ?>" class="inline"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><input type="hidden" name="_action" value="delete"><button class="btn-danger text-xs px-2 py-1.5">Del</button></form></div></td><?php foreach ($columns as $column): ?><?php $raw = (string) ($row[$column['name']] ?? ''); $value = formatDateValue($raw); $image = $uploadedImages[$raw] ?? null; ?><td title="<?= e($raw) ?>"><?php if ($image): ?><a href="<?= e($image['url']) ?>" target="_blank" rel="noopener" class="inline-block"><img src="<?= e($image['url']) ?>" alt="<?= e($image['original_name']) ?>" loading="lazy" class="h-16 w-16 rounded-lg border border-line object-cover"></a><?php else: ?><?= e($value) ?><?php endif; ?></td><?php endforeach; ?></tr><?php endforeach; ?>
 <?php if (!$rows): ?><tr><td colspan="<?= count($columns)+2 ?>" class="py-14 text-center text-slate-600">No records found.</td></tr><?php endif; ?>
 </tbody></table></div>
 <?php $totalPages = max(1, (int) $meta['pages']); $currentPage = (int) $meta['page']; ?>
@@ -52,7 +64,7 @@ $queryUrl = static function (array $changes = []): string {
 </div>
 <?php endif; ?>
 </div>
-<?php foreach ($rows as $row): ?><dialog id="edit-<?= e($row['uid']) ?>" class="w-full max-w-xl rounded-2xl border border-line bg-panel p-0 text-slate-200"><form class="p-6" method="post" action="/projects/<?= e($project['uid']) ?>/tables/<?= e($table) ?>/records/<?= e($row['uid']) ?>"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><div class="mb-5 flex justify-between"><h3 class="font-semibold text-white">Edit record</h3><button type="button" data-dialog-close>Close</button></div><div class="grid gap-4 md:grid-cols-2"><?php foreach ($editable as $column): ?><label><span class="label"><?= e($column['name']) ?></span><input class="input" name="<?= e($column['name']) ?>" value="<?= e($row[$column['name']] ?? '') ?>" <?= $column['notnull'] ? 'required' : '' ?>></label><?php endforeach; ?></div><div class="mt-6 flex justify-between"><button class="btn-primary">Save changes</button><button class="btn-danger" name="_action" value="delete" onclick="return confirm('Delete this record permanently?')">Delete</button></div></form></dialog><?php endforeach; ?>
+<?php foreach ($rows as $row): ?><dialog id="edit-<?= e($row['uid']) ?>" class="w-full max-w-xl rounded-2xl border border-line bg-panel p-0 text-slate-200"><form class="p-6" method="post" action="/projects/<?= e($project['uid']) ?>/tables/<?= e($table) ?>/records/<?= e($row['uid']) ?>"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><div class="mb-5 flex justify-between"><h3 class="font-semibold text-white">Edit record</h3><button type="button" data-dialog-close>Close</button></div><div class="grid gap-4 md:grid-cols-2"><?php foreach ($editable as $column): ?><label><span class="label"><?= e($column['name']) ?></span><input class="input" name="<?= e($column['name']) ?>" value="<?= e(formatDateValue($row[$column['name']] ?? '')) ?>" <?= $column['notnull'] ? 'required' : '' ?>></label><?php endforeach; ?></div><div class="mt-6 flex justify-between"><button class="btn-primary">Save changes</button><button class="btn-danger" name="_action" value="delete" onclick="return confirm('Delete this record permanently?')">Delete</button></div></form></dialog><?php endforeach; ?>
 <?php elseif ($tab === 'images'): ?>
 <?php if ($tableImages): ?>
 <form id="image-bulk-form" method="post" action="/projects/<?= e($project['uid']) ?>/tables/<?= e($table) ?>/images/bulk-delete"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"></form>

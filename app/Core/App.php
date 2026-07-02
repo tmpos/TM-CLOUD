@@ -19,6 +19,7 @@ use App\Services\RealtimeService;
 use App\Services\WebhookService;
 use App\Services\LicenseService;
 use App\Services\DatabaseBridgeService;
+use App\Services\PdfService;
 
 final class App
 {
@@ -42,8 +43,9 @@ final class App
         $installer = new InstallerService($config, $auth);
         $licenses = new LicenseService($db, $logs);
         $databaseBridge = new DatabaseBridgeService($db, $schema, $logs, $config);
+        $pdf = new PdfService();
 
-        (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge))->register();
+        (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge, $pdf))->register();
         (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups))->register();
     }
 

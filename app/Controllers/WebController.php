@@ -17,6 +17,7 @@ use App\Services\RecordService;
 use App\Services\SchemaService;
 use App\Services\StorageService;
 use App\Services\LicenseService;
+use App\Services\PdfService;
 use App\Services\WebhookService;
 use App\Services\DatabaseBridgeService;
 use Flight;
@@ -39,6 +40,7 @@ final class WebController
         private WebhookService $webhooks,
         private LicenseService $licenses,
         private DatabaseBridgeService $databaseBridge,
+        private PdfService $pdf,
     ) {
     }
 
@@ -252,6 +254,7 @@ final class WebController
             Flight::redirect("/projects/$uid/tables/$table");
         }));
         Flight::route('GET /projects/@uid/tables/@table/export', fn (string $uid, string $table) => $this->page(fn () => $this->export($uid, $table)));
+        Flight::route('GET /projects/@uid/tables/@table/@record/pdf', fn (string $uid, string $table, string $record) => $this->page(fn () => $this->pdfInvoice($uid, $table, $record)));
         Flight::route('POST /projects/@uid/backups', fn (string $uid) => $this->action(function () use ($uid): void {
             $this->backups->create($this->projects->find($uid));
             Http::flash('success', 'Backup created.');
@@ -536,6 +539,23 @@ final class WebController
         header('Content-Type: ' . ($format === 'csv' ? 'text/csv' : 'application/json'));
         header('Content-Disposition: attachment; filename="' . $table . '.' . $format . '"');
         echo $this->transfer->export($rows, $format);
+    }
+
+    private function pdfInvoice(string $uid, string $table, string $recordUid): void
+    {
+        $project = $this->projects->find($uid);
+        $record = $this->records->find($project, $table, $recordUid);
+        $pdf = $this->pdf->invoice($project, $table, $record);
+
+        if (str_starts_with($pdf, '%PDF')) {
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: inline; filename="factura_' . $recordUid . '.pdf"');
+            echo $pdf;
+        } else {
+            header('Content-Type: text/html; charset=utf-8');
+            echo $pdf;
+        }
+        exit;
     }
 
     private function downloadBackup(string $uid, string $backupUid): void
