@@ -34,7 +34,8 @@ $queryUrl = static function (array $changes = []): string {
 <?php if ($tab === 'data'): ?>
 <form class="mb-4 flex gap-2" method="get">
 <?php if (isset($_GET['order_by'])): ?><input type="hidden" name="order_by" value="<?= e($orderBy) ?>"><input type="hidden" name="order_dir" value="<?= e($orderDir) ?>"><?php endif; ?>
-<input class="input max-w-md" name="search" value="<?= e($_GET['search'] ?? '') ?>" placeholder="Search all columns..."><button class="btn-secondary">Search</button></form>
+<input class="input max-w-md" name="search" value="<?= e($_GET['search'] ?? '') ?>" placeholder="Search all columns..."><button class="btn-secondary">Search</button><a href="?tab=data" class="btn-secondary text-sm" title="Advanced filters">Filtros</a></form>
+<?php require __DIR__ . '/advanced_filters.php'; ?>
 
 <form id="bulk-form" method="post" action="/projects/<?= e($project['uid']) ?>/tables/<?= e($table) ?>/records/bulk-delete"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"></form>
 <div class="mb-3 flex flex-wrap items-center gap-2">

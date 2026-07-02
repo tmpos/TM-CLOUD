@@ -39,6 +39,15 @@ final class RecordService
                 $params[] = $value;
             }
         }
+        $flt = $query['flt'] ?? [];
+        if (is_array($flt)) {
+            foreach ($flt as $column => $value) {
+                if (in_array((string) $column, $columns, true) && $value !== '') {
+                    $where[] = 'CAST(' . Support::quoteIdentifier((string) $column) . ' AS TEXT) LIKE ?';
+                    $params[] = '%' . $value . '%';
+                }
+            }
+        }
         $whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
         $orderBy = in_array($query['order_by'] ?? '', $columns, true) ? $query['order_by'] : 'id';
         $direction = strtoupper((string) ($query['order_dir'] ?? 'DESC')) === 'ASC' ? 'ASC' : 'DESC';

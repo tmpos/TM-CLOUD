@@ -193,4 +193,52 @@ final class SchemaService
             $db->exec("CREATE {$unique}INDEX " . Support::quoteIdentifier($index) . ' ON ' . Support::quoteIdentifier($table) . ' (' . Support::quoteIdentifier($column) . ')');
         }
     }
+
+    public function ensureFkSystemTable(array $project): void
+    {
+        $db = $this->connection($project);
+        $db->exec("CREATE TABLE IF NOT EXISTS _system_foreign_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT NOT NULL,
+            column_name TEXT NOT NULL,
+            ref_table TEXT NOT NULL,
+            ref_column TEXT NOT NULL,
+            on_delete TEXT NOT NULL DEFAULT 'CASCADE',
+            created_at TEXT NOT NULL
+        )");
+    }
+
+    public function foreignKeys(array $project, string $table): array
+    {
+        $this->ensureFkSystemTable($project);
+        $db = $this->connection($project);
+        $stmt = $db->prepare('SELECT * FROM _system_foreign_keys WHERE table_name = ? ORDER BY id');
+        $stmt->execute([$table]);
+        return $stmt->fetchAll();
+    }
+
+    public function addForeignKey(array $project, string $table, string $column, string $refTable, string $refColumn = 'id', string $onDelete = 'CASCADE'): void
+    {
+        $this->ensureFkSystemTable($project);
+        $db = $this->connection($project);
+        $stmt = $db->prepare('INSERT INTO _system_foreign_keys (table_name, column_name, ref_table, ref_column, on_delete, created_at) VALUES (?,?,?,?,?,?)');
+        $stmt->execute([$table, $column, $refTable, $refColumn, $onDelete, Support::now()]);
+        $this->logs->write('field.foreign_key_added', $project['uid'], $table, null, null, ['column' => $column, 'references' => "$refTable($refColumn)"]);
+    }
+
+    public function dropForeignKey(array $project, string $table, string $column): void
+    {
+        $this->ensureFkSystemTable($project);
+        $db = $this->connection($project);
+        $stmt = $db->prepare('DELETE FROM _system_foreign_keys WHERE table_name = ? AND column_name = ?');
+        $stmt->execute([$table, $column]);
+        $this->logs->write('field.foreign_key_removed', $project['uid'], $table);
+    }
+
+    public function relations(array $project): array
+    {
+        $this->ensureFkSystemTable($project);
+        $db = $this->connection($project);
+        return $db->query('SELECT * FROM _system_foreign_keys ORDER BY table_name, id')->fetchAll();
+    }
 }

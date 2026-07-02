@@ -4,7 +4,7 @@
     <div class="flex items-center gap-2"><button data-dialog-open="#new-table-dialog" class="btn-primary">New table</button><form method="post" action="/projects/<?= e($project['uid']) ?>/delete" data-confirm="Permanently delete this project, database, uploads and backups?" class="inline"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><button class="btn-danger">Delete project</button></form></div>
 </div>
 <nav class="mb-6 flex gap-6 overflow-x-auto border-b border-line">
-<?php foreach (['tables'=>'Tables','database'=>'MySQL Sync','sql'=>'SQL Editor','settings'=>'API keys','backups'=>'Backups','storage'=>'Storage','webhooks'=>'Webhooks','licenses'=>'Licenses','logs'=>'Logs'] as $key=>$label): ?>
+<?php foreach (['tables'=>'Tables','database'=>'MySQL Sync','sql'=>'SQL Editor','settings'=>'API keys','backups'=>'Backups','storage'=>'Storage','webhooks'=>'Webhooks','licenses'=>'Licenses','logs'=>'Logs','diagram'=>'Diagram','functions'=>'Functions','migrations'=>'Migrations','metrics'=>'Metrics'] as $key=>$label): ?>
     <a class="tab <?= $tab === $key ? 'active' : '' ?>" href="?tab=<?= e($key) ?>"><?= e($label) ?></a>
 <?php endforeach; ?>
 </nav>
@@ -50,7 +50,15 @@
 <?php elseif ($tab === 'licenses'): ?>
 <?php require __DIR__ . '/licenses.php'; ?>
 <?php elseif ($tab === 'logs'): ?>
-<div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Action</th><th>Table</th><th>Record</th><th>IP</th></tr></thead><tbody><?php foreach ($logs as $log): ?><tr><td><?= e($log['created_at']) ?></td><td><?= e($log['action']) ?></td><td><?= e($log['table_name']) ?></td><td class="font-mono text-xs"><?= e($log['record_uid']) ?></td><td><?= e($log['ip_address']) ?></td></tr><?php endforeach; ?></tbody></table></div>
+<?php require __DIR__ . '/project_logs.php'; ?>
+<?php elseif ($tab === 'diagram'): ?>
+<?php require __DIR__ . '/schema_diagram.php'; ?>
+<?php elseif ($tab === 'functions'): ?>
+<?php require __DIR__ . '/project_functions.php'; ?>
+<?php elseif ($tab === 'migrations'): ?>
+<?php require __DIR__ . '/project_migrations.php'; ?>
+<?php elseif ($tab === 'metrics'): ?>
+<?php require __DIR__ . '/project_metrics.php'; ?>
 <?php endif; ?>
 
 <dialog id="new-table-dialog" class="w-full max-w-md rounded-2xl border border-line bg-panel p-0 text-slate-200"><form class="p-6" method="post" action="/projects/<?= e($project['uid']) ?>/tables"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><div class="mb-5 flex justify-between"><h3 class="text-lg font-semibold text-white">Create table</h3><button type="button" data-dialog-close>Close</button></div><label><span class="label">Table name</span><input class="input" name="name" required pattern="[A-Za-z][A-Za-z0-9_]{0,62}" placeholder="customers"></label><p class="mt-2 text-xs text-slate-500">id, uid, created_at and updated_at are added automatically.</p><button class="btn-primary mt-5 w-full">Create table</button></form></dialog>

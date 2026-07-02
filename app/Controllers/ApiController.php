@@ -8,6 +8,7 @@ use App\Core\Http;
 use App\Services\ApiKeyService;
 use App\Services\BackupService;
 use App\Services\ImportExportService;
+use App\Services\MetricsService;
 use App\Services\LogService;
 use App\Services\ProjectService;
 use App\Services\RecordService;
@@ -31,6 +32,7 @@ final class ApiController
         private LicenseService $licenses,
         private LogService $logs,
         private BackupService $backups,
+        private MetricsService $metrics,
     ) {
     }
 
@@ -346,6 +348,7 @@ final class ApiController
             $project = $this->projects->find($projectUid);
             $this->schema->columns($project, $table);
             $this->keys->authorize($project, $table, $_SERVER['REQUEST_METHOD'] ?? 'GET', $this->bearer());
+            $this->metrics->track('api_request', $projectUid);
             $callback($project);
         } catch (\Throwable $e) {
             $status = in_array($e->getCode(), [401, 403, 404, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
@@ -361,6 +364,7 @@ final class ApiController
             if (!$key || !hash_equals($project['secret_key'], $key)) {
                 throw new \RuntimeException('Secret key required.', 401);
             }
+            $this->metrics->track('api_request', $projectUid);
             $callback($project);
         } catch (\Throwable $e) {
             Flight::json(['error' => $e->getMessage()], $e->getCode() === 401 ? 401 : 400);
@@ -372,6 +376,7 @@ final class ApiController
         try {
             $project = $this->projects->find($projectUid);
             $this->keys->authorizeProject($project, $this->bearer(), $secretOnly);
+            $this->metrics->track('api_request', $projectUid);
             $callback($project);
         } catch (\Throwable $e) {
             $status = in_array($e->getCode(), [401, 403, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);

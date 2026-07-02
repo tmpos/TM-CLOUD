@@ -17,6 +17,9 @@ use App\Services\RecordService;
 use App\Services\SchemaService;
 use App\Services\StorageService;
 use App\Services\LicenseService;
+use App\Services\FunctionService;
+use App\Services\MetricsService;
+use App\Services\MigrationService;
 use App\Services\PdfService;
 use App\Services\WebhookService;
 use App\Services\DatabaseBridgeService;
@@ -41,6 +44,9 @@ final class WebController
         private LicenseService $licenses,
         private DatabaseBridgeService $databaseBridge,
         private PdfService $pdf,
+        private FunctionService $functions,
+        private MetricsService $metrics,
+        private MigrationService $migrations,
     ) {
     }
 
@@ -367,6 +373,44 @@ final class WebController
             Http::flash('success', 'Device blocked.');
             Flight::redirect('/licenses');
         }));
+        Flight::route('POST /projects/@uid/foreign-keys', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $project = $this->projects->find($uid);
+            $this->schema->addForeignKey($project, (string) ($in['table'] ?? ''), (string) ($in['column'] ?? ''), (string) ($in['ref_table'] ?? ''), (string) ($in['ref_column'] ?? 'id'), (string) ($in['on_delete'] ?? 'CASCADE'));
+            Http::flash('success', 'Foreign key added.');
+            Flight::redirect("/projects/$uid?tab=diagram");
+        }));
+        Flight::route('POST /projects/@uid/foreign-keys/delete', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $project = $this->projects->find($uid);
+            $this->schema->dropForeignKey($project, (string) ($in['table'] ?? ''), (string) ($in['column'] ?? ''));
+            Http::flash('success', 'Foreign key removed.');
+            Flight::redirect("/projects/$uid?tab=diagram");
+        }));
+        Flight::route('POST /projects/@uid/functions', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $this->functions->create($uid, (string) ($in['name'] ?? ''), (string) ($in['code'] ?? ''), (string) ($in['description'] ?? ''), (string) ($in['event'] ?? ''));
+            Http::flash('success', 'Function created.');
+            Flight::redirect("/projects/$uid?tab=functions");
+        }));
+        Flight::route('POST /projects/@uid/functions/@function/delete', fn (string $uid, string $function) => $this->action(function () use ($uid, $function): void {
+            $this->functions->delete($function);
+            Http::flash('success', 'Function deleted.');
+            Flight::redirect("/projects/$uid?tab=functions");
+        }));
+        Flight::route('POST /projects/@uid/functions/@function/toggle', fn (string $uid, string $function) => $this->action(function () use ($uid, $function): void {
+            $fn = $this->functions->find($function);
+            $this->functions->update($function, $fn['name'], $fn['code'], $fn['description'] ?? '', $fn['event'] ?? '', !$fn['is_active']);
+            Http::flash('success', 'Function toggled.');
+            Flight::redirect("/projects/$uid?tab=functions");
+        }));
+        Flight::route('POST /projects/@uid/migrations/migrate', fn (string $uid) => $this->action(function () use ($uid): void {
+            $output = $this->migrations->migrate($uid);
+            Http::flash('success', implode("\n", $output));
+            Flight::redirect("/projects/$uid?tab=migrations");
+        }));
+        Flight::route('POST /projects/@uid/migrations/rollback', fn (string $uid) => $this->action(function () use ($uid): void {
+            $output = $this->migrations->rollback($uid);
+            Http::flash('success', implode("\n", $output));
+            Flight::redirect("/projects/$uid?tab=migrations");
+        }));
     }
 
     private function home(): void
@@ -470,9 +514,32 @@ final class WebController
         }
         $sqlEditor = $_SESSION['_sql_editor'] ?? ['query' => 'SELECT * FROM your_table LIMIT 100;', 'target' => 'sqlite', 'result' => null];
         unset($_SESSION['_sql_editor']);
+        $allTables = $this->schema->tables($project);
+        $relations = $this->schema->relations($project);
+        $columnsByTable = [];
+        foreach ($allTables as $t) {
+            try { $columnsByTable[$t['name']] = $this->schema->columns($project, $t['name']); } catch (\Throwable) { $columnsByTable[$t['name']] = []; }
+        }
+        $foreignKeys = [];
+        $fnOutput = [];
+        foreach ($allTables as $t) {
+            $fks = $this->schema->foreignKeys($project, $t['name']);
+            $foreignKeys = array_merge($foreignKeys, $fks);
+        }
+        $summary = $this->metrics->summary($uid);
+        $requestsTimeline = $this->metrics->timeline('api_request', $uid);
+        $storageUsage = $this->metrics->storageUsage($this->config['storage']);
+        $storageHuman = function($bytes) {
+            if ($bytes >= 1073741824) return number_format($bytes / 1073741824, 1) . ' GB';
+            if ($bytes >= 1048576) return number_format($bytes / 1048576, 1) . ' MB';
+            if ($bytes >= 1024) return number_format($bytes / 1024, 1) . ' KB';
+            return $bytes . ' B';
+        };
+        preg_match('/^\d+\.\d+\.\d+/', file_get_contents($this->config['root'] . '/composer.json'), $m);
+
         View::render('project', [
-            'title' => $project['name'], 'project' => $project, 'tables' => $this->schema->tables($project),
-            'logs' => $this->logs->recent($uid, 40), 'backups' => $this->backups->all($uid),
+            'title' => $project['name'], 'project' => $project, 'tables' => $allTables,
+            'logs' => $this->logs->recent($uid, 100), 'backups' => $this->backups->all($uid),
             'files' => $this->storage->all($project), 'webhooks' => $this->webhooks->all($uid),
             'licenses' => $this->licenses->all($uid),
             'tab' => $tab, 'flashes' => Http::flashes(),
@@ -480,6 +547,17 @@ final class WebController
             'connections' => $connections, 'selectedConnection' => $selectedConnection,
             'mysqlTables' => $mysqlTables, 'mysqlTablesError' => $mysqlTablesError,
             'sqlEditor' => $sqlEditor,
+            'foreignKeys' => $foreignKeys,
+            'relations' => $relations,
+            'columnsByTable' => $columnsByTable,
+            'functions' => $this->functions->all($uid),
+            'migrations' => $this->migrations->all(),
+            'output' => [],
+            'summary' => $summary,
+            'storageUsage' => $storageUsage,
+            'storageHuman' => $storageHuman($storageUsage['total']),
+            'requestsTimeline' => $requestsTimeline,
+            'fnCount' => count($this->functions->all($uid)),
         ]);
     }
 

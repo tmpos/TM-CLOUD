@@ -9,7 +9,7 @@ use PDO;
 
 final class WebhookService
 {
-    public function __construct(private PDO $db, private ?RealtimeService $realtime = null)
+    public function __construct(private PDO $db, private ?RealtimeService $realtime = null, private ?FunctionService $functions = null)
     {
     }
 
@@ -57,5 +57,14 @@ final class WebhookService
         }
 
         $this->realtime?->broadcast($event, $project, $table, $record);
+
+        if ($this->functions) {
+            $payload = ['event' => $event, 'project' => $project, 'table' => $table, 'record' => $record];
+            foreach ($this->functions->all($project['uid']) as $fn) {
+                if ($fn['is_active'] && $fn['event'] === $event) {
+                    $this->functions->execute($fn['uid'], $payload);
+                }
+            }
+        }
     }
 }

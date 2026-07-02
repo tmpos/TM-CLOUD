@@ -1,0 +1,13 @@
+<div class="mb-6 flex flex-wrap gap-3">
+  <label><span class="label">Tabla</span><select id="fk-table" class="input"><?php foreach ($tables as $t): ?><option value="<?= e($t['name']) ?>"><?= e($t['name']) ?></option><?php endforeach; ?></select></label>
+  <label><span class="label">Columna</span><input id="fk-column" class="input" placeholder="column_name"></label>
+  <label><span class="label">Referencia</span><select id="fk-ref-table" class="input"><?php foreach ($tables as $t): ?><option value="<?= e($t['name']) ?>"><?= e($t['name']) ?></option><?php endforeach; ?></select></label>
+  <label><span class="label">Columna ref</span><input id="fk-ref-column" class="input" value="id"></label>
+  <label><span class="label">On delete</span><select id="fk-on-delete" class="input"><option>CASCADE</option><option>SET NULL</option><option>RESTRICT</option></select></label>
+  <button onclick="addFK()" class="btn-primary self-end">Add FK</button>
+</div>
+<div class="table-wrap"><table class="data-table"><thead><tr><th>Table</th><th>Column</th><th>References</th><th>On Delete</th><th></th></tr></thead><tbody id="fk-list"><?php foreach ($foreignKeys as $fk): ?><tr><td><?= e($fk['table_name']) ?></td><td><?= e($fk['column_name']) ?></td><td><?= e($fk['ref_table']) ?>(<?= e($fk['ref_column']) ?>)</td><td><?= e($fk['on_delete']) ?></td><td><button class="btn-danger text-xs" onclick="dropFK('<?= e($fk['table_name']) ?>','<?= e($fk['column_name']) ?>')">Remove</button></td></tr><?php endforeach; ?></tbody></table></div>
+<script>
+function addFK(){const t=document.getElementById('fk-table').value,c=document.getElementById('fk-column').value,r=document.getElementById('fk-ref-table').value,rc=document.getElementById('fk-ref-column').value,od=document.getElementById('fk-on-delete').value;if(!c)return;const f=document.createElement('form');f.method='post';f.action='/projects/<?= e($project['uid']) ?>/foreign-keys';const h={_csrf:'<?= e(Csrf::token()) ?>',table:t,column:c,ref_table:r,ref_column:rc,on_delete:od};for(const[k,v]of Object.entries(h)){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=v;f.appendChild(i)}document.body.appendChild(f);f.submit()}
+function dropFK(t,c){if(!confirm('Remove FK '+t+'.'+c+'?'))return;const f=document.createElement('form');f.method='post';f.action='/projects/<?= e($project['uid']) ?>/foreign-keys/delete';const h={_csrf:'<?= e(Csrf::token()) ?>',table:t,column:c};for(const[k,v]of Object.entries(h)){const i=document.createElement('input');i.type='hidden';i.name=k;i.value=v;f.appendChild(i)}document.body.appendChild(f);f.submit()}
+</script>
