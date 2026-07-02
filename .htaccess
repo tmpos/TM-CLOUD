@@ -1,0 +1,13 @@
+Options -Indexes
+RewriteEngine On
+
+# Never expose application code, dependencies, configuration or stored data.
+RewriteRule ^(?:app|config|database|storage|vendor)(?:/|$) - [F,L,NC]
+RewriteRule ^(?:\.env|\.env\.example|composer\.(?:json|lock)|README\.md|prompt\.md|router\.php)$ - [F,L,NC]
+
+# Serve public assets without exposing the /public prefix.
+RewriteCond %{DOCUMENT_ROOT}/public/$1 -f
+RewriteRule ^(.+)$ public/$1 [L]
+
+# Send every application request to FlightPHP.
+RewriteRule ^ public/index.php [QSA,L]

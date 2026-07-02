@@ -1,0 +1,10 @@
+/vendor/
+/storage/*.sqlite
+/storage/installed.lock
+/storage/projects/*
+/storage/backups/*
+/storage/uploads/*
+!/storage/projects/.gitkeep
+!/storage/backups/.gitkeep
+!/storage/uploads/.gitkeep
+/.env

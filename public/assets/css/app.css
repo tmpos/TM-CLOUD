@@ -1,0 +1,22 @@
+* { scrollbar-width: thin; scrollbar-color: #334155 #090d12; }
+.nav-link { display:block; border-radius:.65rem; padding:.65rem .8rem; color:#94a3b8; transition:.15s; }
+.nav-link:hover { background:#17212b; color:#fff; }
+.card { border:1px solid #22303d; background:#111820; border-radius:1rem; }
+.btn-primary { display:inline-flex; align-items:center; justify-content:center; border-radius:.65rem; background:#2dd4bf; padding:.6rem .9rem; color:#07110f; font-size:.875rem; font-weight:700; transition:.15s; }
+.btn-primary:hover { background:#5eead4; }
+.btn-secondary { display:inline-flex; align-items:center; justify-content:center; border:1px solid #334155; border-radius:.65rem; padding:.55rem .85rem; color:#cbd5e1; font-size:.875rem; transition:.15s; }
+.btn-secondary:hover { border-color:#64748b; color:#fff; }
+.btn-danger { display:inline-flex; align-items:center; justify-content:center; border:1px solid rgb(244 63 94 / .35); border-radius:.65rem; padding:.55rem .85rem; color:#fda4af; font-size:.875rem; }
+.input { width:100%; border:1px solid #334155; background:#0b1117; border-radius:.65rem; padding:.65rem .8rem; color:#f1f5f9; outline:none; }
+.input:focus { border-color:#2dd4bf; box-shadow:0 0 0 3px rgb(45 212 191 / .1); }
+.label { display:block; margin-bottom:.4rem; color:#94a3b8; font-size:.75rem; font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
+.table-wrap { overflow:auto; border:1px solid #22303d; border-radius:1rem; }
+.data-table { width:100%; min-width:760px; border-collapse:collapse; font-size:.875rem; }
+.data-table th { background:#0d141b; padding:.75rem 1rem; text-align:left; color:#64748b; font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
+.table-sort { display:inline-flex; align-items:center; gap:.4rem; color:inherit; transition:color .15s; }
+.table-sort:hover, .table-sort.active { color:#2dd4bf; }
+.table-sort-icon { font-size:.8rem; line-height:1; }
+.data-table td { border-top:1px solid #1d2935; padding:.8rem 1rem; color:#cbd5e1; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tab { border-bottom:2px solid transparent; padding:.8rem .2rem; color:#64748b; font-size:.875rem; }
+.tab.active { border-color:#2dd4bf; color:#f8fafc; }
+dialog::backdrop { background:rgb(0 0 0 / .72); backdrop-filter:blur(3px); }
