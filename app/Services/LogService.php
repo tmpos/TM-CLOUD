@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Core\Auth;
+use App\Core\Http;
 use App\Core\Support;
 use PDO;
 
@@ -16,6 +17,8 @@ final class LogService
 
     public function write(string $action, ?string $projectUid = null, ?string $table = null, ?string $recordUid = null, mixed $old = null, mixed $new = null): void
     {
+        $old = $this->sanitize($old);
+        $new = $this->sanitize($new);
         $stmt = $this->db->prepare(
             'INSERT INTO project_logs (uid,project_uid,user_uid,action,table_name,record_uid,old_data,new_data,ip_address,user_agent,created_at)
              VALUES (?,?,?,?,?,?,?,?,?,?,?)'
@@ -23,8 +26,26 @@ final class LogService
         $stmt->execute([
             Support::uid('log_'), $projectUid, Auth::user()['uid'] ?? null, $action, $table, $recordUid,
             $old === null ? null : Support::json($old), $new === null ? null : Support::json($new),
-            $_SERVER['REMOTE_ADDR'] ?? null, substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500), Support::now(),
+            Http::clientIp(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500), Support::now(),
         ]);
+    }
+
+    private function sanitize(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        $sanitized = [];
+        foreach ($value as $key => $item) {
+            $name = strtolower((string) $key);
+            if (preg_match('/(?:password|passwd|secret|token|api[_-]?key|public[_-]?key|private[_-]?key|authorization|credential|smtp[_-]?pass)/i', $name)) {
+                $sanitized[$key] = '[REDACTED]';
+                continue;
+            }
+            $sanitized[$key] = $this->sanitize($item);
+        }
+        return $sanitized;
     }
 
     public function deletedSince(string $projectUid, string $since): array

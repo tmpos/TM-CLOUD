@@ -1,0 +1,1 @@
+<section class="card" style="max-width:650px;margin:40px auto"><h1>No disponible</h1><p><?= e($error ?? 'No se pudo completar la solicitud.') ?></p><a class="btn" href="/portal/dashboard">Volver</a></section>

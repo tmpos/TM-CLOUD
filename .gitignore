@@ -8,3 +8,4 @@
 !/storage/backups/.gitkeep
 !/storage/uploads/.gitkeep
 /.env
+/node-port/.env

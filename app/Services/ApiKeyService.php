@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Core\Http;
 use PDO;
 
 final class ApiKeyService
@@ -32,7 +33,7 @@ final class ApiKeyService
         if (!$allowed) {
             throw new \RuntimeException('A valid API key with sufficient permissions is required.', 401);
         }
-        $this->rateLimit($key ?? ($_SERVER['REMOTE_ADDR'] ?? 'anonymous'));
+        $this->rateLimit($key ?? Http::clientIp());
         return $role;
     }
 
@@ -50,10 +51,16 @@ final class ApiKeyService
         return $role;
     }
 
-    private function rateLimit(string $identity): void
+    public function rateLimitPublic(string $scope, int $maxHits = 30, int $windowSeconds = 60): void
     {
-        $hash = hash('sha256', $identity);
-        $bucket = gmdate('YmdHi');
+        $ip = trim(Http::clientIp()) ?: 'unknown';
+        $this->rateLimit('public:' . $scope . ':' . $ip, max(1, $maxHits), max(60, $windowSeconds));
+    }
+
+    private function rateLimit(string $identity, ?int $customLimit = null, int $windowSeconds = 60): void
+    {
+        $hash = hash('sha256', $identity . ':window:' . $windowSeconds);
+        $bucket = (string) (intdiv(time(), $windowSeconds) * $windowSeconds);
         $stmt = $this->db->prepare(
             'INSERT INTO rate_limits (api_key_hash,bucket,hits) VALUES (?,?,1)
              ON CONFLICT(api_key_hash,bucket) DO UPDATE SET hits = hits + 1'
@@ -61,12 +68,12 @@ final class ApiKeyService
         $stmt->execute([$hash, $bucket]);
         $check = $this->db->prepare('SELECT hits FROM rate_limits WHERE api_key_hash = ? AND bucket = ?');
         $check->execute([$hash, $bucket]);
-        if ((int) $check->fetchColumn() > $this->limit) {
+        if ((int) $check->fetchColumn() > ($customLimit ?? $this->limit)) {
             throw new \RuntimeException('Rate limit exceeded.', 429);
         }
         if (random_int(1, 100) === 1) {
-            $cleanup = $this->db->prepare('DELETE FROM rate_limits WHERE bucket < ?');
-            $cleanup->execute([gmdate('YmdHi', time() - 7200)]);
+            $cleanup = $this->db->prepare('DELETE FROM rate_limits WHERE length(bucket) <= 10 AND CAST(bucket AS INTEGER) < ?');
+            $cleanup->execute([time() - 172800]);
         }
     }
 }

@@ -27,6 +27,15 @@ final class ProjectService
         return $stmt->fetch() ?: throw new RuntimeException('Project not found.');
     }
 
+    public function findActive(string $uid): array
+    {
+        $project = $this->find($uid);
+        if (($project['status'] ?? '') !== 'active') {
+            throw new RuntimeException('Project is not active.', 403);
+        }
+        return $project;
+    }
+
     public function create(array $data): array
     {
         $name = trim((string) ($data['name'] ?? ''));
@@ -80,6 +89,20 @@ final class ProjectService
         return $this->find($uid);
     }
 
+    public function rotateKey(string $uid, string $type): array
+    {
+        $this->find($uid);
+        if (!in_array($type, ['public', 'secret'], true)) {
+            throw new \InvalidArgumentException('Key type must be public or secret.');
+        }
+        $column = $type . '_key';
+        $key = Support::apiKey($type);
+        $stmt = $this->db->prepare("UPDATE projects SET $column = ?, updated_at = ? WHERE uid = ?");
+        $stmt->execute([$key, Support::now(), $uid]);
+        $this->logs->write('project.' . $type . '_key_rotated', $uid);
+        return ['type' => $type, 'key' => $key, 'project' => $this->find($uid)];
+    }
+
     public function delete(string $uid): void
     {
         $project = $this->find($uid);
@@ -88,7 +111,12 @@ final class ProjectService
         if (!$storageRoot || !$projectDirectory || !str_starts_with($projectDirectory, $storageRoot . DIRECTORY_SEPARATOR . 'projects' . DIRECTORY_SEPARATOR)) {
             throw new RuntimeException('Refusing to remove a project outside the storage directory.');
         }
-        $this->logs->write('project.deleted', $uid, null, null, $project);
+        $this->logs->write('project.deleted', $uid, null, null, [
+            'uid' => $project['uid'],
+            'name' => $project['name'],
+            'slug' => $project['slug'],
+            'status' => $project['status'],
+        ]);
         $this->db->beginTransaction();
         try {
             foreach (['webhooks', 'backups', 'project_logs'] as $table) {

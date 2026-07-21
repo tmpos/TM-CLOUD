@@ -83,7 +83,7 @@ final class RecordService
             ->fetchAll();
     }
 
-    public function create(array $project, string $table, array $data): array
+    public function create(array $project, string $table, array $data, bool $writeLog = true): array
     {
         $db = $this->schema->connection($project);
         $data = $this->sanitize($project, $table, $data, true);
@@ -97,11 +97,13 @@ final class RecordService
             implode(',', array_fill(0, count($columns), '?')) . ')';
         $db->prepare($sql)->execute(array_values($data));
         $record = $this->find($project, $table, $data['uid']);
-        $this->logs->write('record.created', $project['uid'], $table, $data['uid'], null, $record);
+        if ($writeLog) {
+            $this->logs->write('record.created', $project['uid'], $table, $data['uid'], null, $record);
+        }
         return $record;
     }
 
-    public function update(array $project, string $table, string $uid, array $data): array
+    public function update(array $project, string $table, string $uid, array $data, bool $writeLog = true): array
     {
         $old = $this->find($project, $table, $uid);
         $data = $this->sanitize($project, $table, $data, false);
@@ -113,7 +115,9 @@ final class RecordService
             'UPDATE ' . Support::quoteIdentifier($table) . " SET $assignments WHERE uid = ?"
         )->execute($values);
         $record = $this->find($project, $table, $uid);
-        $this->logs->write('record.updated', $project['uid'], $table, $uid, $old, $record);
+        if ($writeLog) {
+            $this->logs->write('record.updated', $project['uid'], $table, $uid, $old, $record);
+        }
         return $record;
     }
 
@@ -146,7 +150,7 @@ final class RecordService
         return ['deleted' => $deleted, 'failed' => count($errors), 'errors' => $errors];
     }
 
-    public function bulk(array $project, string $table, array $rows): array
+    public function bulk(array $project, string $table, array $rows, bool $atomic = false): array
     {
         if (count($rows) > 1000) {
             throw new \InvalidArgumentException('A bulk request may contain at most 1000 rows.');
@@ -155,22 +159,35 @@ final class RecordService
         $inserted = 0;
         $errors = [];
         $db->beginTransaction();
-        foreach ($rows as $index => $row) {
-            try {
-                if (!is_array($row)) {
-                    throw new \InvalidArgumentException('Row must be an object.');
+        try {
+            foreach ($rows as $index => $row) {
+                try {
+                    if (!is_array($row)) {
+                        throw new \InvalidArgumentException('Row must be an object.');
+                    }
+                    $this->create($project, $table, $row, false);
+                    $inserted++;
+                } catch (\Throwable $e) {
+                    $errors[] = ['row' => $index, 'error' => $e->getMessage()];
                 }
-                $this->create($project, $table, $row);
-                $inserted++;
-            } catch (\Throwable $e) {
-                $errors[] = ['row' => $index, 'error' => $e->getMessage()];
             }
+            if ($atomic && $errors) {
+                $db->rollBack();
+                throw new \InvalidArgumentException('Atomic bulk request rolled back at row ' . $errors[0]['row'] . ': ' . $errors[0]['error']);
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $e;
         }
-        $db->commit();
-        return ['inserted' => $inserted, 'failed' => count($errors), 'errors' => $errors];
+        $result = ['inserted' => $inserted, 'failed' => count($errors), 'errors' => $errors, 'atomic' => $atomic];
+        $this->logs->write('record.bulk', $project['uid'], $table, null, null, $result);
+        return $result;
     }
 
-    public function upsert(array $project, string $table, array $rows): array
+    public function upsert(array $project, string $table, array $rows, bool $atomic = false): array
     {
         if (count($rows) > 1000) {
             throw new \InvalidArgumentException('An upsert request may contain at most 1000 rows.');
@@ -180,27 +197,40 @@ final class RecordService
         $updated = 0;
         $errors = [];
         $db->beginTransaction();
-        foreach ($rows as $index => $row) {
-            try {
-                if (!is_array($row) || empty($row['uid'])) {
-                    throw new \InvalidArgumentException('Each row must contain a uid.');
-                }
+        try {
+            foreach ($rows as $index => $row) {
                 try {
-                    $this->find($project, $table, (string) $row['uid']);
-                    $uid = (string) $row['uid'];
-                    unset($row['uid'], $row['created_at']);
-                    $this->update($project, $table, $uid, $row);
-                    $updated++;
-                } catch (RuntimeException) {
-                    $this->create($project, $table, $row);
-                    $inserted++;
+                    if (!is_array($row) || empty($row['uid'])) {
+                        throw new \InvalidArgumentException('Each row must contain a uid.');
+                    }
+                    try {
+                        $this->find($project, $table, (string) $row['uid']);
+                        $uid = (string) $row['uid'];
+                        unset($row['uid'], $row['created_at']);
+                        $this->update($project, $table, $uid, $row, false);
+                        $updated++;
+                    } catch (RuntimeException) {
+                        $this->create($project, $table, $row, false);
+                        $inserted++;
+                    }
+                } catch (\Throwable $e) {
+                    $errors[] = ['row' => $index, 'error' => $e->getMessage()];
                 }
-            } catch (\Throwable $e) {
-                $errors[] = ['row' => $index, 'error' => $e->getMessage()];
             }
+            if ($atomic && $errors) {
+                $db->rollBack();
+                throw new \InvalidArgumentException('Atomic upsert request rolled back at row ' . $errors[0]['row'] . ': ' . $errors[0]['error']);
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $e;
         }
-        $db->commit();
-        return ['inserted' => $inserted, 'updated' => $updated, 'failed' => count($errors), 'errors' => $errors];
+        $result = ['inserted' => $inserted, 'updated' => $updated, 'failed' => count($errors), 'errors' => $errors, 'atomic' => $atomic];
+        $this->logs->write('record.upsert', $project['uid'], $table, null, null, $result);
+        return $result;
     }
 
     public function modified(array $project, string $table, string $from, ?string $to = null): array

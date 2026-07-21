@@ -5,7 +5,7 @@ TMPBase es una plataforma backend privada construida con PHP, SQLite y FlightPHP
 ## Requisitos
 
 - PHP 8.1 o superior.
-- Extensiones `pdo_sqlite` y `fileinfo`.
+- Extensiones `pdo_sqlite`, `fileinfo`, `mbstring` y `gd`.
 - Extensión `pdo_mysql` para sincronización o consultas MySQL.
 - Apache con `mod_rewrite`, Nginx o el servidor de desarrollo de PHP.
 - Permiso de escritura sobre `storage/`.
@@ -30,8 +30,43 @@ APP_ENV=production
 APP_DEBUG=false
 SESSION_SECURE=true
 MAX_UPLOAD_MB=10
+PROJECT_STORAGE_MAX_MB=1024
 RATE_LIMIT_PER_MINUTE=120
+CORS_ALLOWED_ORIGINS=https://app.example.com
+TRUSTED_PROXIES=
+BACKUP_RETENTION_COUNT=20
+BACKUP_RETENTION_DAYS=90
+BACKUP_MAX_MB_PER_PROJECT=5120
+MAIL_ENABLED=true
+MAIL_HOST=smtp.example.com
+MAIL_PORT=587
+MAIL_ENCRYPTION=tls
+MAIL_USERNAME=mailer@example.com
+MAIL_PASSWORD=use-a-server-secret
+MAIL_FROM_ADDRESS=mailer@example.com
 ```
+
+Las credenciales SMTP pertenecen exclusivamente al servidor. Los clientes instalados solicitan mensajes controlados mediante licencia y equipo autorizado; nunca reciben ni almacenan la contraseña SMTP.
+
+El portal empresarial se abre en `/portal/login`. Un administrador crea miembros con `POST /api/{project}/portal/users` usando la clave secreta del proyecto. Desde el portal se consultan facturas, clientes, productos y categorías según la membresía.
+
+Las facturas pueden compartirse mediante enlaces dinámicos `/share/invoice/{token}` y `/share/invoice/{token}.pdf`. El contenido se genera desde la factura sincronizada actual, de modo que el mismo enlace refleja modificaciones posteriores. El PDF profesional utiliza el logo y los datos sincronizados de `empresa`; cuando existe NCF/e-NCF incluye un QR local con el enlace oficial de verificación de DGII, RNC emisor, monto total y código de seguridad.
+
+## Capacidades añadidas
+
+- Las licencias registran los equipos inicialmente como `pending`; solo `authorize-device` permite su acceso.
+- El panel ofrece una modal de solo lectura para mostrar y copiar cada licencia.
+- Los dispositivos pueden autorizarse, bloquearse o revocarse de forma transaccional.
+- Las claves pública y secreta pueden rotarse por separado mediante `/api/{project}/keys/rotate`.
+- TM Cloud puede crear en lote las tablas o columnas ausentes mediante `/api/{project}/schema/tables/batch`.
+- `bulk` y `upsert` aceptan `{"rows": [...], "atomic": true}` para cargas todo-o-nada.
+- El almacenamiento valida rutas, MIME, extensión y cuotas; `/api/{project}/storage/cleanup` limpia huérfanos de forma controlada.
+- Los backups se validan con checksum e integridad SQLite, se restauran de forma atómica y aplican retención configurable.
+- El correo se compone y se encola en el servidor; los clientes no reciben credenciales SMTP.
+- El portal empresarial permite consultar facturas, clientes, productos y categorías de los proyectos asignados.
+- Las respuestas de error incluyen `code`, `message` y `request_id`; los logs redactan secretos automáticamente.
+
+Antes de publicar consulte [docs/DEPLOYMENT_CHECKLIST.md](docs/DEPLOYMENT_CHECKLIST.md).
 
 En Apache o Nginx, el directorio público debe ser `public/`. Las solicitudes que no correspondan a archivos reales deben dirigirse a `public/index.php`. Para Hostinger consulte [HOSTINGER.md](HOSTINGER.md).
 
@@ -302,6 +337,8 @@ Debe respaldar también:
 
 ## Seguridad
 
+- Las auditorías redactan automáticamente contraseñas, tokens, credenciales y claves API.
+- `X-Forwarded-For` solo se acepta cuando la conexión llega desde una IP incluida en `TRUSTED_PROXIES`.
 - Los identificadores SQL son validados y entrecomillados.
 - Los valores se envían mediante consultas preparadas.
 - El panel usa sesiones y protección CSRF.

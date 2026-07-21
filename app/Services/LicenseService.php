@@ -23,7 +23,11 @@ final class LicenseService
 
     public function all(string $projectUid): array
     {
-        $stmt = $this->db->prepare('SELECT * FROM licenses WHERE project_uid = ? ORDER BY id DESC');
+        $stmt = $this->db->prepare(
+            'SELECT l.*, p.name AS project_name, p.public_key AS public_key, p.secret_key AS secret_key
+             FROM licenses l JOIN projects p ON p.uid = l.project_uid
+             WHERE l.project_uid = ? ORDER BY l.id DESC'
+        );
         $stmt->execute([$projectUid]);
         return $stmt->fetchAll();
     }
@@ -31,7 +35,7 @@ final class LicenseService
     public function allGlobal(): array
     {
         return $this->db->query(
-            'SELECT l.*, p.name AS project_name
+            'SELECT l.*, p.name AS project_name, p.public_key AS public_key, p.secret_key AS secret_key
              FROM licenses l
              JOIN projects p ON p.uid = l.project_uid
              ORDER BY l.id DESC'
@@ -40,18 +44,61 @@ final class LicenseService
 
     public function find(string $uid): array
     {
-        $stmt = $this->db->prepare('SELECT * FROM licenses WHERE uid = ? LIMIT 1');
+        $stmt = $this->db->prepare(
+            'SELECT l.*, p.name AS project_name, p.public_key AS public_key, p.secret_key AS secret_key
+             FROM licenses l JOIN projects p ON p.uid = l.project_uid WHERE l.uid = ? LIMIT 1'
+        );
         $stmt->execute([$uid]);
+        return $stmt->fetch() ?: throw new RuntimeException('License not found.');
+    }
+
+    public function findForProject(string $uid, string $projectUid): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT l.*, p.name AS project_name, p.public_key AS public_key, p.secret_key AS secret_key
+             FROM licenses l JOIN projects p ON p.uid = l.project_uid
+             WHERE l.uid = ? AND l.project_uid = ? LIMIT 1'
+        );
+        $stmt->execute([$uid, $projectUid]);
         return $stmt->fetch() ?: throw new RuntimeException('License not found.');
     }
 
     public function findByKey(string $licenseKey): array
     {
         $stmt = $this->db->prepare(
-            'SELECT l.*, p.name AS project_name FROM licenses l JOIN projects p ON p.uid = l.project_uid WHERE l.license_key = ? LIMIT 1'
+            'SELECT l.*, p.name AS project_name, p.public_key AS public_key, p.secret_key AS secret_key
+             FROM licenses l JOIN projects p ON p.uid = l.project_uid WHERE l.license_key = ? LIMIT 1'
         );
         $stmt->execute([$licenseKey]);
         return $stmt->fetch() ?: throw new RuntimeException('License not found.');
+    }
+
+    public function apiData(array $license, bool $includeLicenseKey = false): array
+    {
+        $allowed = [
+            'uid', 'project_uid', 'project_name', 'system_name', 'status', 'max_uses',
+            'current_uses', 'expires_at', 'project_url', 'public_key', 'nombre', 'link',
+            'tipo', 'proximopago', 'dispositivos', 'equipos_no_autorizados',
+            'created_at', 'updated_at',
+        ];
+        if ($includeLicenseKey) {
+            $allowed[] = 'license_key';
+        }
+
+        $safe = [];
+        foreach ($allowed as $field) {
+            if (array_key_exists($field, $license)) {
+                $safe[$field] = $license[$field];
+            }
+        }
+        $safe['authorized_devices'] = $license['dispositivos']
+            ? (json_decode((string) $license['dispositivos'], true) ?? [])
+            : [];
+        $safe['unauthorized_devices'] = $license['equipos_no_autorizados']
+            ? (json_decode((string) $license['equipos_no_autorizados'], true) ?? [])
+            : [];
+        unset($safe['dispositivos'], $safe['equipos_no_autorizados']);
+        return $safe;
     }
 
     public function create(string $projectUid, array $data): array
@@ -78,7 +125,7 @@ final class LicenseService
         }
 
         $cols = ['uid', 'project_uid', 'system_name', 'license_key', 'status', 'max_uses', 'current_uses', 'expires_at', 'metadata', 'project_url', 'public_key', 'secret_key', ...self::EXTRA_FIELDS, 'created_at', 'updated_at'];
-        $vals = [$uid, $projectUid, $systemName, $licenseKey, 'active', $maxUses, 0, $expiresAt, $metadata, (string) ($data['project_url'] ?? ''), (string) ($data['public_key'] ?? ''), (string) ($data['secret_key'] ?? ''), ...array_values($extra), $now, $now];
+        $vals = [$uid, $projectUid, $systemName, $licenseKey, 'active', $maxUses, 0, $expiresAt, $metadata, (string) ($data['project_url'] ?? ''), '', '', ...array_values($extra), $now, $now];
         $placeholders = implode(', ', array_fill(0, count($cols), '?'));
 
         $stmt = $this->db->prepare("INSERT INTO licenses (" . implode(', ', $cols) . ") VALUES ($placeholders)");
@@ -138,7 +185,7 @@ final class LicenseService
 
     public function validate(string $licenseKey, ?string $systemName = null): array
     {
-        $stmt = $this->db->prepare('SELECT l.*, p.name AS project_name, p.status AS project_status FROM licenses l JOIN projects p ON p.uid = l.project_uid WHERE l.license_key = ? LIMIT 1');
+        $stmt = $this->db->prepare('SELECT l.*, p.name AS project_name, p.status AS project_status, p.public_key AS public_key, p.secret_key AS secret_key FROM licenses l JOIN projects p ON p.uid = l.project_uid WHERE l.license_key = ? LIMIT 1');
         $stmt->execute([$licenseKey]);
         $license = $stmt->fetch();
 
@@ -147,44 +194,57 @@ final class LicenseService
         }
 
         if ($license['status'] === 'blocked') {
-            return ['valid' => false, 'error' => 'License is blocked.', 'license' => $license];
+            return ['valid' => false, 'error' => 'License is blocked.', 'license' => $this->apiData($license)];
         }
 
         if ($license['status'] === 'expired') {
-            return ['valid' => false, 'error' => 'License has expired.', 'license' => $license];
+            return ['valid' => false, 'error' => 'License has expired.', 'license' => $this->apiData($license)];
         }
 
         if ($license['expires_at'] && $license['expires_at'] < Support::now()) {
             $this->setStatus($license['uid'], 'expired');
-            return ['valid' => false, 'error' => 'License has expired.', 'license' => $this->find($license['uid'])];
-        }
-
-        if ($license['max_uses'] > 0 && $license['current_uses'] >= $license['max_uses']) {
-            return ['valid' => false, 'error' => 'License usage limit reached.', 'license' => $license];
+            return ['valid' => false, 'error' => 'License has expired.', 'license' => $this->apiData($this->find($license['uid']))];
         }
 
         if ($systemName && $license['system_name'] !== $systemName) {
-            return ['valid' => false, 'error' => 'License is not valid for this system.', 'license' => $license];
+            return ['valid' => false, 'error' => 'License is not valid for this system.', 'license' => $this->apiData($license)];
         }
 
-        return ['valid' => true, 'license' => $license, 'project_url' => $license['project_url'], 'public_key' => $license['public_key'], 'secret_key' => $license['secret_key']];
+        return ['valid' => true, 'license' => $this->apiData($license), 'project_url' => $license['project_url'], 'public_key' => $license['public_key']];
     }
 
     public function use(string $licenseKey): array
     {
-        $result = $this->validate($licenseKey);
-        if (!$result['valid']) {
-            return $result;
-        }
-        $stmt = $this->db->prepare('UPDATE licenses SET current_uses = current_uses + 1, updated_at = ? WHERE license_key = ?');
-        $stmt->execute([Support::now(), $licenseKey]);
-        $result['license'] = $this->find($result['license']['uid']);
-        return $result;
+        return $this->validate($licenseKey);
     }
 
-    public function registerDevice(string $licenseKey, string $deviceId): array
+    public function devicesForLicense(string $licenseUid): array
+    {
+        $stmt = $this->db->prepare('SELECT device_id,status,requested_at,authorized_at,revoked_at,last_seen_at,app_version FROM license_devices WHERE license_uid = ? ORDER BY created_at ASC');
+        $stmt->execute([$licenseUid]);
+        $rows = $stmt->fetchAll();
+        $byStatus = ['pending' => [], 'authorized' => [], 'blocked' => [], 'revoked' => []];
+        foreach ($rows as $row) $byStatus[$row['status']][] = $row;
+        return [
+            'records' => $rows,
+            'pending_devices' => array_column($byStatus['pending'], 'device_id'),
+            'authorized_devices' => array_column($byStatus['authorized'], 'device_id'),
+            'blocked_devices' => array_column($byStatus['blocked'], 'device_id'),
+            'revoked_devices' => array_column($byStatus['revoked'], 'device_id'),
+        ];
+    }
+
+    public function isDeviceAuthorized(string $licenseUid, string $deviceId): bool
+    {
+        $stmt = $this->db->prepare("SELECT 1 FROM license_devices WHERE license_uid = ? AND device_id = ? AND status = 'authorized' LIMIT 1");
+        $stmt->execute([$licenseUid, strtoupper(trim($deviceId))]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    public function registerDevice(string $licenseKey, string $deviceId, array $context = []): array
     {
         $license = $this->findByKey($licenseKey);
+        $deviceId = strtoupper(trim($deviceId));
 
         if ($license['status'] !== 'active') {
             return ['success' => false, 'error' => 'License is not active.'];
@@ -193,55 +253,72 @@ final class LicenseService
             return ['success' => false, 'error' => 'License has expired.'];
         }
 
-        $devices = $license['dispositivos'] ? (json_decode($license['dispositivos'], true) ?? []) : [];
-        $blocked = $license['equipos_no_autorizados'] ? (json_decode($license['equipos_no_autorizados'], true) ?? []) : [];
         $maxDevices = max(0, (int) $license['max_uses']);
-
-        if (in_array($deviceId, $blocked, true)) {
-            return ['success' => false, 'error' => 'Device is not authorized.', 'device_blocked' => true];
+        $now = Support::now();
+        $this->db->beginTransaction();
+        try {
+            $lock = $this->db->prepare('UPDATE licenses SET updated_at = updated_at WHERE uid = ?');
+            $lock->execute([$license['uid']]);
+            $find = $this->db->prepare('SELECT * FROM license_devices WHERE license_uid = ? AND device_id = ? LIMIT 1');
+            $find->execute([$license['uid'], $deviceId]);
+            $device = $find->fetch();
+            if ($device && $device['status'] === 'blocked') {
+                $this->db->commit();
+                return ['success' => false, 'error' => 'Device is blocked.', 'device_blocked' => true, 'device_id' => $deviceId];
+            }
+            if (!$device) {
+                $stmt = $this->db->prepare('INSERT INTO license_devices (uid,license_uid,device_id,status,requested_at,last_seen_at,ip_address,app_version,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)');
+                $stmt->execute([Support::uid('dev_'), $license['uid'], $deviceId, 'pending', $now, $now, $context['ip_address'] ?? null, $context['app_version'] ?? null, $now, $now]);
+                $status = 'pending';
+            } else {
+                $status = $device['status'] === 'revoked' ? 'pending' : $device['status'];
+                $stmt = $this->db->prepare('UPDATE license_devices SET status = ?, requested_at = CASE WHEN ? = \'pending\' THEN ? ELSE requested_at END, last_seen_at = ?, ip_address = ?, app_version = COALESCE(?, app_version), updated_at = ? WHERE id = ?');
+                $stmt->execute([$status, $status, $now, $now, $context['ip_address'] ?? null, $context['app_version'] ?? null, $now, $device['id']]);
+            }
+            $this->syncLegacyDevices($license['uid']);
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $e;
         }
+        $authorized = $status === 'authorized';
+        $this->logs->write($authorized ? 'license.device_seen' : 'license.device_pending', $license['project_uid'], null, $license['uid'], null, ['device_id' => $deviceId]);
 
-        if (in_array($deviceId, $devices, true)) {
-            return ['success' => true, 'device_registered' => true, 'device_id' => $deviceId];
-        }
-
-        if ($maxDevices > 0 && count($devices) >= $maxDevices) {
-            $blocked[] = $deviceId;
-            $stmt = $this->db->prepare('UPDATE licenses SET equipos_no_autorizados = ?, updated_at = ? WHERE license_key = ?');
-            $stmt->execute([json_encode($blocked), Support::now(), $licenseKey]);
-            $this->logs->write('license.device_blocked', $license['project_uid'], null, $license['uid'], null, ['device_id' => $deviceId, 'reason' => 'max_devices_reached']);
-            return ['success' => false, 'error' => 'Maximum devices reached. Device has been blocked.', 'device_blocked' => true];
-        }
-
-        $devices[] = $deviceId;
-        $stmt = $this->db->prepare('UPDATE licenses SET dispositivos = ?, current_uses = current_uses + 1, updated_at = ? WHERE license_key = ?');
-        $stmt->execute([json_encode($devices), Support::now(), $licenseKey]);
-        $this->logs->write('license.device_registered', $license['project_uid'], null, $license['uid'], null, ['device_id' => $deviceId]);
-
-        $updated = $this->find($license['uid']);
         return [
             'success' => true,
             'device_registered' => true,
+            'authorized' => $authorized,
+            'pending_authorization' => !$authorized,
             'device_id' => $deviceId,
-            'devices_count' => count($devices),
+            'devices_count' => count($this->devicesForLicense($license['uid'])['authorized_devices']),
             'max_devices' => $maxDevices,
-            'license' => $updated,
+            'license' => $this->find($license['uid']),
         ];
     }
 
     public function authorizeDevice(string $uid, string $deviceId): array
     {
         $license = $this->find($uid);
-        $blocked = $license['equipos_no_autorizados'] ? (json_decode($license['equipos_no_autorizados'], true) ?? []) : [];
-        $devices = $license['dispositivos'] ? (json_decode($license['dispositivos'], true) ?? []) : [];
-
-        $blocked = array_values(array_filter($blocked, fn ($d) => $d !== $deviceId));
-        if (!in_array($deviceId, $devices, true)) {
-            $devices[] = $deviceId;
+        $deviceId = strtoupper(trim($deviceId));
+        $now = Support::now();
+        $this->db->beginTransaction();
+        try {
+            $this->db->prepare('UPDATE licenses SET updated_at = updated_at WHERE uid = ?')->execute([$uid]);
+            $check = $this->db->prepare("SELECT COUNT(*) FROM license_devices WHERE license_uid = ? AND status = 'authorized' AND device_id <> ?");
+            $check->execute([$uid, $deviceId]);
+            $authorizedCount = (int) $check->fetchColumn();
+            $maxDevices = max(0, (int) $license['max_uses']);
+            if ($maxDevices > 0 && $authorizedCount >= $maxDevices) {
+                throw new RuntimeException('License usage limit reached.');
+            }
+            $stmt = $this->db->prepare("INSERT INTO license_devices (uid,license_uid,device_id,status,requested_at,authorized_at,last_seen_at,created_at,updated_at) VALUES (?,?,?,'authorized',?,?,?,?,?) ON CONFLICT(license_uid,device_id) DO UPDATE SET status='authorized', authorized_at=excluded.authorized_at, revoked_at=NULL, updated_at=excluded.updated_at");
+            $stmt->execute([Support::uid('dev_'), $uid, $deviceId, $now, $now, $now, $now, $now]);
+            $this->syncLegacyDevices($uid);
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $e;
         }
-
-        $stmt = $this->db->prepare('UPDATE licenses SET dispositivos = ?, equipos_no_autorizados = ?, updated_at = ? WHERE uid = ?');
-        $stmt->execute([json_encode($devices), json_encode($blocked), Support::now(), $uid]);
         $this->logs->write('license.device_authorized', $license['project_uid'], null, $uid, null, ['device_id' => $deviceId]);
         return $this->find($uid);
     }
@@ -249,26 +326,61 @@ final class LicenseService
     public function blockDevice(string $uid, string $deviceId): array
     {
         $license = $this->find($uid);
-        $devices = $license['dispositivos'] ? (json_decode($license['dispositivos'], true) ?? []) : [];
-        $blocked = $license['equipos_no_autorizados'] ? (json_decode($license['equipos_no_autorizados'], true) ?? []) : [];
-
-        $devices = array_values(array_filter($devices, fn ($d) => $d !== $deviceId));
-        if (!in_array($deviceId, $blocked, true)) {
-            $blocked[] = $deviceId;
-        }
-
-        $stmt = $this->db->prepare('UPDATE licenses SET dispositivos = ?, equipos_no_autorizados = ?, updated_at = ? WHERE uid = ?');
-        $stmt->execute([json_encode($devices), json_encode($blocked), Support::now(), $uid]);
+        $this->setDeviceStatus($uid, $deviceId, 'blocked');
         $this->logs->write('license.device_blocked', $license['project_uid'], null, $uid, null, ['device_id' => $deviceId]);
+        return $this->find($uid);
+    }
+
+    public function revokeDevice(string $uid, string $deviceId): array
+    {
+        $license = $this->find($uid);
+        $this->setDeviceStatus($uid, $deviceId, 'revoked');
+        $this->logs->write('license.device_revoked', $license['project_uid'], null, $uid, null, ['device_id' => $deviceId]);
         return $this->find($uid);
     }
 
     public function resetUses(string $uid): array
     {
         $license = $this->find($uid);
-        $stmt = $this->db->prepare('UPDATE licenses SET current_uses = 0, updated_at = ? WHERE uid = ?');
-        $stmt->execute([Support::now(), $uid]);
+        $now = Support::now();
+        $this->db->beginTransaction();
+        try {
+            $this->db->prepare("UPDATE license_devices SET status = 'revoked', revoked_at = ?, updated_at = ? WHERE license_uid = ? AND status = 'authorized'")->execute([$now, $now, $uid]);
+            $this->syncLegacyDevices($uid);
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $e;
+        }
         $this->logs->write('license.uses_reset', $license['project_uid'], null, $uid);
         return $this->find($uid);
+    }
+
+    private function setDeviceStatus(string $uid, string $deviceId, string $status): void
+    {
+        $deviceId = strtoupper(trim($deviceId));
+        $now = Support::now();
+        $revokedAt = in_array($status, ['blocked', 'revoked'], true) ? $now : null;
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare('INSERT INTO license_devices (uid,license_uid,device_id,status,requested_at,revoked_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(license_uid,device_id) DO UPDATE SET status=excluded.status, revoked_at=excluded.revoked_at, updated_at=excluded.updated_at');
+            $stmt->execute([Support::uid('dev_'), $uid, $deviceId, $status, $now, $revokedAt, $now, $now]);
+            $this->syncLegacyDevices($uid);
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $e;
+        }
+    }
+
+    private function syncLegacyDevices(string $uid): void
+    {
+        $groups = $this->devicesForLicense($uid);
+        $unauthorized = array_values(array_unique([...$groups['pending_devices'], ...$groups['blocked_devices']]));
+        $stmt = $this->db->prepare('UPDATE licenses SET dispositivos = ?, equipos_no_autorizados = ?, current_uses = ?, updated_at = ? WHERE uid = ?');
+        $stmt->execute([
+            json_encode($groups['authorized_devices']), json_encode($unauthorized),
+            count($groups['authorized_devices']), Support::now(), $uid,
+        ]);
     }
 }

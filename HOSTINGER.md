@@ -43,22 +43,24 @@ public_html/
 Enable hidden files in Hostinger File Manager so `.htaccess` and `.env` are
 uploaded.
 
-## 3. Composer is optional
+## 3. Composer is required for mail and online PDFs
+
+Before installing dependencies, enable the PHP extensions `pdo_sqlite`,
+`fileinfo`, `mbstring` and `gd` from the Hostinger PHP configuration panel.
 
 Hostinger Premium, Business and Cloud plans provide SSH and Composer 2. Connect
-through SSH and optionally run:
+through SSH and run:
 
 ```bash
 cd domains/your-domain.tld/public_html
 composer2 install --no-dev --optimize-autoloader
 ```
 
-If the plan has no SSH access, no additional action is required. TMPBase
-automatically uses its included Flight-compatible router when `vendor/` is
-absent. Uploading the complete project through File Manager is sufficient.
-
-Using Composer remains recommended when SSH is available because it loads the
-official FlightPHP package.
+If the plan has no SSH access, execute `composer install --no-dev
+--optimize-autoloader` locally in an environment with the same PHP version and
+upload the complete generated `vendor/` directory. The fallback router can
+serve basic routes without Composer, but server mail (PHPMailer) and online PDF
+generation (mPDF) require their Composer dependencies.
 
 ## 4. Create the environment file
 
@@ -71,7 +73,21 @@ APP_ENV=production
 APP_DEBUG=false
 SESSION_SECURE=true
 MAX_UPLOAD_MB=10
+PROJECT_STORAGE_MAX_MB=1024
 RATE_LIMIT_PER_MINUTE=120
+CORS_ALLOWED_ORIGINS=https://app.your-domain.tld
+TRUSTED_PROXIES=
+BACKUP_RETENTION_COUNT=20
+BACKUP_RETENTION_DAYS=90
+BACKUP_MAX_MB_PER_PROJECT=5120
+MAIL_ENABLED=true
+MAIL_HOST=smtp.your-provider.tld
+MAIL_PORT=587
+MAIL_ENCRYPTION=tls
+MAIL_USERNAME=mailer@your-domain.tld
+MAIL_PASSWORD=store-this-only-on-the-server
+MAIL_FROM_ADDRESS=mailer@your-domain.tld
+MAIL_FROM_NAME=TMPBase
 ```
 
 Do not add a trailing slash to `APP_URL`.

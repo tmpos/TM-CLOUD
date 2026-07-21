@@ -628,6 +628,10 @@ final class WebController
         if (str_starts_with($pdf, '%PDF')) {
             header('Content-Type: application/pdf');
             header('Content-Disposition: inline; filename="factura_' . $recordUid . '.pdf"');
+            header('Content-Length: ' . strlen($pdf));
+            header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+            header('Pragma: no-cache');
+            header('Expires: 0');
             echo $pdf;
         } else {
             header('Content-Type: text/html; charset=utf-8');

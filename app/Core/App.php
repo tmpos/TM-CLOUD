@@ -6,6 +6,7 @@ namespace App\Core;
 
 use App\Controllers\ApiController;
 use App\Controllers\WebController;
+use App\Controllers\PortalController;
 use App\Services\ApiKeyService;
 use App\Services\BackupService;
 use App\Services\ImportExportService;
@@ -23,6 +24,9 @@ use App\Services\FunctionService;
 use App\Services\MetricsService;
 use App\Services\MigrationService;
 use App\Services\PdfService;
+use App\Services\MailService;
+use App\Services\SharedDocumentService;
+use App\Core\PortalAuth;
 
 final class App
 {
@@ -47,12 +51,16 @@ final class App
         $installer = new InstallerService($config, $auth);
         $licenses = new LicenseService($db, $logs);
         $databaseBridge = new DatabaseBridgeService($db, $schema, $logs, $config);
-        $pdf = new PdfService();
+        $pdf = new PdfService($schema);
+        $mail = new MailService($db, $config['mail'] ?? [], $logs);
+        $sharedDocuments = new SharedDocumentService($db, $config, $logs);
+        $portalAuth = new PortalAuth($db);
         $metrics = new MetricsService($db);
         $migrations = new MigrationService($db, $config['storage']);
 
         (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge, $pdf, $functions, $metrics, $migrations))->register();
-        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics))->register();
+        (new PortalController($config, $portalAuth, $projects, $schema, $records, $pdf, $sharedDocuments, $keys))->register();
+        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics, $mail, $sharedDocuments, $pdf, $portalAuth))->register();
     }
 
     private static function ensureStorage(string $storage): void

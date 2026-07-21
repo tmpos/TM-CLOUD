@@ -13,6 +13,13 @@ final class StorageService
     {
     }
 
+    public function apiData(array $file): array
+    {
+        return array_intersect_key($file, array_flip([
+            'uid', 'original_name', 'mime_type', 'size', 'url', 'directory', 'created_at',
+        ]));
+    }
+
     private function ensureDirectoryColumn(array $project): void
     {
         $db = $this->schema->connection($project);
@@ -63,22 +70,47 @@ final class StorageService
             throw new \InvalidArgumentException('The file exceeds the configured upload limit.');
         }
         $this->ensureDirectoryColumn($project);
+        $usedBytes = (int) $this->schema->connection($project)->query('SELECT COALESCE(SUM(size), 0) FROM _system_files')->fetchColumn();
+        $projectLimit = max((int) $this->config['max_upload_bytes'], (int) ($this->config['project_storage_max_bytes'] ?? 0));
+        if ($projectLimit > 0 && $usedBytes + (int) $file['size'] > $projectLimit) {
+            throw new RuntimeException('Project storage quota exceeded.', 413);
+        }
         $uid = Support::uid('fil_');
         $extension = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
-        $storedName = $uid . ($extension !== '' ? '.' . preg_replace('/[^a-z0-9]/', '', $extension) : '');
-        $directory = trim($directory, '/') ?: '/';
-        $uploadDir = $this->config['storage'] . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . $project['uid'];
-        if ($directory !== '/') {
-            $uploadDir .= DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $directory);
+        $allowedTypes = [
+            'jpg' => ['image/jpeg'], 'jpeg' => ['image/jpeg'], 'png' => ['image/png'],
+            'webp' => ['image/webp'], 'gif' => ['image/gif'], 'pdf' => ['application/pdf'],
+            'txt' => ['text/plain'], 'csv' => ['text/plain', 'text/csv', 'application/csv'],
+            'json' => ['application/json', 'text/plain'], 'zip' => ['application/zip', 'application/x-zip-compressed'],
+            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip'],
+            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
+        ];
+        if ($extension === '' || !isset($allowedTypes[$extension])) {
+            throw new \InvalidArgumentException('This file type is not allowed.');
         }
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file((string) $file['tmp_name']) ?: 'application/octet-stream';
+        if (!in_array(strtolower($mime), $allowedTypes[$extension], true)) {
+            throw new \InvalidArgumentException('This file content type is not allowed.');
+        }
+        $storedName = $uid . ($extension !== '' ? '.' . preg_replace('/[^a-z0-9]/', '', $extension) : '');
+        $directory = $this->normalizeDirectory($directory);
+        $projectRoot = $this->config['storage'] . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . $project['uid'];
+        if (!is_dir($projectRoot) && !mkdir($projectRoot, 0775, true) && !is_dir($projectRoot)) {
+            throw new RuntimeException('Could not create the project upload directory.');
+        }
+        $uploadDir = $projectRoot . ($directory === '/' ? '' : DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $directory));
         if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true) && !is_dir($uploadDir)) {
             throw new RuntimeException('Could not create the upload directory.');
+        }
+        $rootReal = realpath($projectRoot);
+        $uploadReal = realpath($uploadDir);
+        if (!$rootReal || !$uploadReal || ($uploadReal !== $rootReal && !str_starts_with($uploadReal, $rootReal . DIRECTORY_SEPARATOR))) {
+            throw new RuntimeException('Invalid upload directory.');
         }
         $path = $uploadDir . DIRECTORY_SEPARATOR . $storedName;
         if (!move_uploaded_file($file['tmp_name'], $path)) {
             throw new RuntimeException('Could not store the uploaded file.');
         }
-        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($path) ?: 'application/octet-stream';
         $url = $this->config['url'] . '/api/' . $project['uid'] . '/storage/' . $uid;
         $stmt = $this->schema->connection($project)->prepare(
             'INSERT INTO _system_files (uid,original_name,stored_name,mime_type,size,path,url,directory,created_at) VALUES (?,?,?,?,?,?,?,?,?)'
@@ -86,6 +118,22 @@ final class StorageService
         $stmt->execute([$uid, basename((string) $file['name']), $storedName, $mime, filesize($path), $path, $url, $directory, Support::now()]);
         $this->logs->write('file.uploaded', $project['uid'], '_system_files', $uid);
         return $this->find($project, $uid);
+    }
+
+    private function normalizeDirectory(string $directory): string
+    {
+        if (str_contains($directory, "\0") || str_contains($directory, '\\')) {
+            throw new \InvalidArgumentException('Invalid directory.');
+        }
+        $trimmed = trim($directory, '/');
+        if ($trimmed === '') return '/';
+        $segments = explode('/', $trimmed);
+        foreach ($segments as $segment) {
+            if ($segment === '' || $segment === '.' || $segment === '..' || !preg_match('/^[A-Za-z0-9._-]+$/', $segment)) {
+                throw new \InvalidArgumentException('Invalid directory.');
+            }
+        }
+        return implode('/', $segments);
     }
 
     public function find(array $project, string $uid): array
@@ -152,6 +200,53 @@ final class StorageService
             $deleted++;
         }
         return $deleted;
+    }
+
+    public function cleanupOrphans(array $project): array
+    {
+        $this->ensureDirectoryColumn($project);
+        $db = $this->schema->connection($project);
+        $rows = $db->query('SELECT id, path FROM _system_files')->fetchAll();
+        $known = [];
+        $recordsRemoved = 0;
+        foreach ($rows as $row) {
+            $path = (string) ($row['path'] ?? '');
+            if ($path !== '' && is_file($path)) {
+                $resolved = realpath($path);
+                if ($resolved) $known[strtolower($resolved)] = true;
+                continue;
+            }
+            $db->prepare('DELETE FROM _system_files WHERE id = ?')->execute([$row['id']]);
+            $recordsRemoved++;
+        }
+
+        $projectRoot = $this->config['storage'] . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . $project['uid'];
+        $filesRemoved = 0;
+        $rootReal = is_dir($projectRoot) ? realpath($projectRoot) : false;
+        if ($rootReal) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($rootReal, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST
+            );
+            $cutoff = time() - 86400;
+            foreach ($iterator as $item) {
+                $resolved = $item->getRealPath();
+                if (!$resolved || ($resolved !== $rootReal && !str_starts_with($resolved, $rootReal . DIRECTORY_SEPARATOR))) continue;
+                if ($item->isDir()) {
+                    $entries = @scandir($resolved);
+                    if (is_array($entries) && count($entries) === 2) @rmdir($resolved);
+                    continue;
+                }
+                if (!preg_match('/^fil_[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/', $item->getFilename())) continue;
+                if (!isset($known[strtolower($resolved)]) && $item->getMTime() < $cutoff && @unlink($resolved)) $filesRemoved++;
+            }
+        }
+        if ($recordsRemoved || $filesRemoved) {
+            $this->logs->write('storage.cleaned', $project['uid'], '_system_files', null, null, [
+                'records_removed' => $recordsRemoved, 'files_removed' => $filesRemoved,
+            ]);
+        }
+        return ['records_removed' => $recordsRemoved, 'files_removed' => $filesRemoved];
     }
 
     private function isReferenced(array $project, string $uid, string $url): bool

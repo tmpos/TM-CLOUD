@@ -1,0 +1,27 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use App\Core\Database;
+use App\Core\Env;
+use App\Services\LogService;
+use App\Services\MailService;
+
+$root = dirname(__DIR__);
+require $root . '/vendor/autoload.php';
+require $root . '/app/helpers.php';
+Env::load($root . '/.env');
+$config = require $root . '/config/app.php';
+$db = Database::connect($config['database']);
+Database::migrate($db);
+$mail = new MailService($db, $config['mail'] ?? [], new LogService($db));
+
+try {
+    $result = $mail->process((int) ($argv[1] ?? 20));
+    fwrite(STDOUT, json_encode($result, JSON_UNESCAPED_SLASHES) . PHP_EOL);
+    exit($result['failed'] > 0 ? 1 : 0);
+} catch (Throwable $e) {
+    fwrite(STDERR, $e->getMessage() . PHP_EOL);
+    exit(1);
+}
