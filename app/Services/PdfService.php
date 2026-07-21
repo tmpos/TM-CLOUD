@@ -126,9 +126,10 @@ final class PdfService
 
         $qrBlock = '';
         if ($verificationUrl !== '') {
-            $qrBlock = '<div class="qr-box"><barcode code="' . $e($verificationUrl) . '" type="QR" size="0.82" error="M" disableborder="1" />'
-                . '<div class="qr-title">VERIFICAR EN DGII</div><div class="qr-caption">Escanee para validar el comprobante</div>'
-                . '<div class="qr-link">' . $e($verificationUrl) . '</div></div>';
+            $qrBlock = '<div class="qr-box" style="width:100%;text-align:center;line-height:1.15">'
+                . '<div style="margin-bottom:2mm;color:#078b8f;font-size:7pt;font-weight:bold;letter-spacing:.5pt">VERIFICAR EN DGII</div>'
+                . '<barcode code="' . $e($verificationUrl) . '" type="QR" size="0.68" error="M" disableborder="1" />'
+                . '<div style="margin-top:1.5mm;color:#66777d;font-size:5.5pt">Escanee para validar el comprobante</div></div>';
         }
 
         return '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Factura ' . $invoiceNumber . '</title><style>'
