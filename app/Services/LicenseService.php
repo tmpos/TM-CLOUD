@@ -13,7 +13,7 @@ final class LicenseService
     private const EXTRA_FIELDS = [
         'almacen', 'nombre', 'link', 'token', 'tipo', 'dispositivos',
         'ultimopago', 'proximopago', 'precio', 'encargado', 'telefono',
-        'email', 'direccion', 'usuario', 'identificadordb', 'role_key',
+        'email', 'direccion', 'rnc', 'usuario', 'identificadordb', 'role_key',
         'equipos_no_autorizados',
     ];
 
@@ -78,7 +78,8 @@ final class LicenseService
         $allowed = [
             'uid', 'project_uid', 'project_name', 'system_name', 'status', 'max_uses',
             'current_uses', 'expires_at', 'project_url', 'public_key', 'nombre', 'link',
-            'tipo', 'proximopago', 'dispositivos', 'equipos_no_autorizados',
+            'tipo', 'proximopago', 'telefono', 'email', 'direccion', 'rnc',
+            'dispositivos', 'equipos_no_autorizados',
             'created_at', 'updated_at',
         ];
         if ($includeLicenseKey) {
@@ -99,6 +100,27 @@ final class LicenseService
             : [];
         unset($safe['dispositivos'], $safe['equipos_no_autorizados']);
         return $safe;
+    }
+
+    public function companyData(string $projectUid): array
+    {
+        foreach ($this->all($projectUid) as $license) {
+            $metadata = json_decode((string) ($license['metadata'] ?? ''), true);
+            $metadata = is_array($metadata) ? $metadata : [];
+            $data = [
+                'nombre' => $license['nombre'] ?: ($metadata['nombre'] ?? $metadata['company_name'] ?? $license['project_name'] ?? ''),
+                'rnc' => $license['rnc'] ?: ($metadata['rnc'] ?? $metadata['tax_id'] ?? ''),
+                'telefono' => $license['telefono'] ?: ($metadata['telefono'] ?? $metadata['phone'] ?? ''),
+                'email' => $license['email'] ?: ($metadata['email'] ?? ''),
+                'direccion' => $license['direccion'] ?: ($metadata['direccion'] ?? $metadata['address'] ?? ''),
+                'logo' => $metadata['logo'] ?? $metadata['company_logo'] ?? '',
+                'moneda' => $metadata['moneda'] ?? $metadata['currency'] ?? '',
+            ];
+            if (array_filter($data, static fn (mixed $value): bool => trim((string) $value) !== '')) {
+                return $data;
+            }
+        }
+        return [];
     }
 
     public function create(string $projectUid, array $data): array

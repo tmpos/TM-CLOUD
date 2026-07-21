@@ -20,6 +20,7 @@
 <?php foreach ($licenses as $license): ?>
 <dialog id="edit-license-<?= e($license['uid']) ?>" class="w-full max-w-2xl rounded-2xl border border-line bg-panel p-0 text-slate-200"><div class="max-h-[90vh] overflow-y-auto p-6"><div class="mb-5 flex justify-between"><h3 class="text-lg font-semibold text-white">Edit license</h3><button type="button" data-dialog-close class="text-slate-500">Close</button></div><form method="post" action="/projects/<?= e($project['uid']) ?>/licenses/<?= e($license['uid']) ?>/update"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><div class="grid gap-4 md:grid-cols-2">
 <label><span class="label">Name / Company</span><input class="input" name="nombre" value="<?= e($license['nombre'] ?? '') ?>"></label>
+<label><span class="label">RNC</span><input class="input" name="rnc" value="<?= e($license['rnc'] ?? '') ?>"></label>
 <label><span class="label">System name</span><input class="input" name="system_name" required value="<?= e($license['system_name']) ?>"></label>
 <label><span class="label">License key</span><input class="input font-mono text-xs" value="<?= e($license['license_key']) ?>" disabled></label>
 <label><span class="label">Type</span><input class="input" name="tipo" value="<?= e($license['tipo'] ?? '') ?>" placeholder="e.g. monthly, yearly, trial"></label>
@@ -61,6 +62,7 @@
 
 <dialog id="new-license-dialog" class="w-full max-w-2xl rounded-2xl border border-line bg-panel p-0 text-slate-200"><form class="max-h-[90vh] overflow-y-auto p-6" method="post" action="/projects/<?= e($project['uid']) ?>/licenses"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><div class="mb-5 flex justify-between"><h3 class="text-lg font-semibold text-white">New license</h3><button type="button" data-dialog-close class="text-slate-500">Close</button></div><div class="grid gap-4 md:grid-cols-2">
 <label><span class="label">Name / Company</span><input class="input" name="nombre" placeholder="e.g. Acme Corp"></label>
+<label><span class="label">RNC</span><input class="input" name="rnc" placeholder="e.g. 131123456"></label>
 <label><span class="label">System name</span><input class="input" name="system_name" required placeholder="e.g. SistemaFacturacion"></label>
 <label><span class="label">License key <span class="text-slate-600">(leave empty to auto-generate)</span></span><input class="input font-mono text-xs" name="license_key" placeholder="Auto-generated"></label>
 <label><span class="label">Type</span><input class="input" name="tipo" placeholder="e.g. monthly, yearly, trial"></label>

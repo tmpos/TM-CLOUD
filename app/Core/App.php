@@ -51,7 +51,7 @@ final class App
         $installer = new InstallerService($config, $auth);
         $licenses = new LicenseService($db, $logs);
         $databaseBridge = new DatabaseBridgeService($db, $schema, $logs, $config);
-        $pdf = new PdfService($schema);
+        $pdf = new PdfService($schema, $licenses);
         $mail = new MailService($db, $config['mail'] ?? [], $logs);
         $sharedDocuments = new SharedDocumentService($db, $config, $logs);
         $portalAuth = new PortalAuth($db);

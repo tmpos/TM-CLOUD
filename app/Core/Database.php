@@ -234,7 +234,7 @@ CREATE TABLE IF NOT EXISTS project_memberships (
 );
 CREATE INDEX IF NOT EXISTS idx_memberships_project ON project_memberships(project_uid, role);
 SQL);
-        foreach (['project_url','public_key','secret_key','almacen','nombre','link','token','tipo','dispositivos','ultimopago','proximopago','precio','encargado','telefono','email','direccion','usuario','identificadordb','role_key','equipos_no_autorizados'] as $col) {
+        foreach (['project_url','public_key','secret_key','almacen','nombre','link','token','tipo','dispositivos','ultimopago','proximopago','precio','encargado','telefono','email','direccion','rnc','usuario','identificadordb','role_key','equipos_no_autorizados'] as $col) {
             try { $db->exec("ALTER TABLE licenses ADD COLUMN $col TEXT"); } catch (\Throwable) {}
         }
         foreach (['ALTER TABLE backups ADD COLUMN checksum TEXT', "ALTER TABLE backups ADD COLUMN status TEXT NOT NULL DEFAULT 'valid'"] as $migration) {

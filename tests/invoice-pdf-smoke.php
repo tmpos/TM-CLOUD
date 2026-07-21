@@ -84,6 +84,17 @@ try {
     if (str_contains($htmlWithoutReceipt, '<barcode') || str_contains($htmlWithoutReceipt, 'COMPROBANTE FISCAL')) {
         throw new RuntimeException('An invoice without a tax receipt must not show the DGII QR block.');
     }
+    $schema->connection($project)->exec("UPDATE empresa SET rnc='', direccion='', telefono='', email=''");
+    $invoiceWithEmbeddedCompany = $invoice;
+    $invoiceWithEmbeddedCompany['empresa_telefono'] = '809-555-0303';
+    $invoiceWithEmbeddedCompany['empresa_email'] = 'empresa@example.com';
+    $invoiceWithEmbeddedCompany['empresa_direccion'] = 'Santiago, Republica Dominicana';
+    $fallbackHtml = $service->invoiceHtml($project, $invoiceWithEmbeddedCompany);
+    foreach (['RNC 133130343', '809-555-0303', 'empresa@example.com', 'Santiago, Republica Dominicana'] as $expected) {
+        if (!str_contains($fallbackHtml, $expected)) {
+            throw new RuntimeException("Invoice company fallback is missing: $expected");
+        }
+    }
     echo 'INVOICE_PDF_SMOKE=OK bytes=' . strlen($content) . PHP_EOL;
 } finally {
     \App\Core\Database::disconnect($databasePath);

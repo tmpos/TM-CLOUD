@@ -6,7 +6,7 @@ namespace App\Services;
 
 final class PdfService
 {
-    public function __construct(private SchemaService $schema)
+    public function __construct(private SchemaService $schema, private ?LicenseService $licenses = null)
     {
     }
 
@@ -42,7 +42,7 @@ final class PdfService
 
     public function invoiceHtml(array $project, array $invoice): string
     {
-        $company = $this->firstIfTable($project, 'empresa');
+        $company = $this->companyData($project, $invoice);
         $client = [];
         if (!empty($invoice['cliente_id'])) {
             $client = $this->byLocalReference($project, 'clientes', $invoice['cliente_id']);
@@ -150,13 +150,46 @@ final class PdfService
             . '<footer class="footer"><table class="footer-table"><tr><td class="footer-contact"><strong>' . $companyName . '</strong><br>' . $companyAddress . ($companyPhone !== '' ? '<br>Tel: ' . $companyPhone : '') . ($companyEmail !== '' ? '<br>' . $companyEmail : '') . '</td><td class="footer-note">Documento generado desde la última versión sincronizada.<br>Los enlaces compartidos reflejan las modificaciones de la factura.</td></tr></table></footer></main></body></html>';
     }
 
+    private function companyData(array $project, array $invoice): array
+    {
+        $table = $this->firstIfTable($project, 'empresa');
+        $license = $this->licenses?->companyData((string) ($project['uid'] ?? '')) ?? [];
+        $stampRnc = '';
+        $stampUrl = html_entity_decode(trim((string) ($invoice['alanube_stamp_url'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if ($this->isTrustedDgiiUrl($stampUrl)) {
+            parse_str((string) (parse_url($stampUrl, PHP_URL_QUERY) ?? ''), $stampParameters);
+            $stampRnc = (string) ($stampParameters['RncEmisor'] ?? $stampParameters['RNC'] ?? '');
+        }
+
+        return [
+            'nombre' => $this->firstValue($table['nombre'] ?? '', $license['nombre'] ?? '', $invoice['empresa_nombre'] ?? '', $invoice['emisor_nombre'] ?? '', $project['name'] ?? ''),
+            'rnc' => $this->firstValue($table['rnc'] ?? '', $license['rnc'] ?? '', $invoice['rnc_emisor'] ?? '', $invoice['emisor_rnc'] ?? '', $invoice['empresa_rnc'] ?? '', $stampRnc),
+            'telefono' => $this->firstValue($table['telefono'] ?? '', $license['telefono'] ?? '', $invoice['empresa_telefono'] ?? '', $invoice['emisor_telefono'] ?? ''),
+            'email' => $this->firstValue($table['email'] ?? '', $license['email'] ?? '', $invoice['empresa_email'] ?? '', $invoice['emisor_email'] ?? ''),
+            'direccion' => $this->firstValue($table['direccion'] ?? '', $license['direccion'] ?? '', $invoice['empresa_direccion'] ?? '', $invoice['emisor_direccion'] ?? ''),
+            'logo' => $this->firstValue($table['logo'] ?? '', $license['logo'] ?? '', $invoice['empresa_logo'] ?? '', $invoice['emisor_logo'] ?? ''),
+            'moneda' => $this->firstValue($table['moneda'] ?? '', $license['moneda'] ?? '', $invoice['moneda'] ?? '', 'RD$'),
+        ];
+    }
+
+    private function firstValue(mixed ...$values): string
+    {
+        foreach ($values as $value) {
+            if (trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+        return '';
+    }
+
     private function invoiceFooterHtml(array $project, array $invoice): string
     {
-        $company = $this->firstIfTable($project, 'empresa');
+        $company = $this->companyData($project, $invoice);
         $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $companyName = $e($company['nombre'] ?? $project['name'] ?? 'Empresa');
         $invoiceNumber = $e($invoice['numero'] ?? $invoice['no_factura'] ?? $invoice['uid'] ?? '');
         $contact = array_values(array_filter([
+            trim((string) ($company['rnc'] ?? '')) !== '' ? 'RNC: ' . trim((string) $company['rnc']) : '',
             trim((string) ($company['direccion'] ?? '')),
             trim((string) ($company['telefono'] ?? '')) !== '' ? 'Tel: ' . trim((string) $company['telefono']) : '',
             trim((string) ($company['email'] ?? '')),
