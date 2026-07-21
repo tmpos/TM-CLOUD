@@ -71,6 +71,10 @@ try {
     if (!str_starts_with($content, '%PDF-') || strlen($content) < 10000) {
         throw new RuntimeException('The professional invoice PDF is invalid.');
     }
+    $previewPath = getenv('INVOICE_PDF_PREVIEW');
+    if (is_string($previewPath) && $previewPath !== '') {
+        file_put_contents($previewPath, $content);
+    }
     $invoiceWithoutReceipt = $invoice;
     $invoiceWithoutReceipt['ncf'] = '';
     $invoiceWithoutReceipt['tipo_comprobante'] = 'SIN COMPROBANTE';
