@@ -57,6 +57,7 @@ $invoice = [
     'ncf' => 'E320000000005',
     'tipo_comprobante' => 'E32',
     'alanube_security_code' => 'AJIz2R',
+    'alanube_stamp_url' => 'https://fc.dgii.gov.do/ecf/ConsultaTimbreFC?RncEmisor=133130343&ENCF=E320000000005&MontoTotal=4487.78&CodigoSeguridad=AJIz2R',
     'created_at' => '2026-07-21 14:30:00',
 ];
 
@@ -78,6 +79,7 @@ try {
     $invoiceWithoutReceipt = $invoice;
     $invoiceWithoutReceipt['ncf'] = '';
     $invoiceWithoutReceipt['tipo_comprobante'] = 'SIN COMPROBANTE';
+    $invoiceWithoutReceipt['alanube_stamp_url'] = '';
     $htmlWithoutReceipt = $service->invoiceHtml($project, $invoiceWithoutReceipt);
     if (str_contains($htmlWithoutReceipt, '<barcode') || str_contains($htmlWithoutReceipt, 'COMPROBANTE FISCAL')) {
         throw new RuntimeException('An invoice without a tax receipt must not show the DGII QR block.');

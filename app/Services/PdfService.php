@@ -13,6 +13,10 @@ final class PdfService
     public function invoice(array $project, string $table, array $record): string
     {
         $html = $this->invoiceHtml($project, $record);
+        $html = preg_replace('#<footer class="footer">.*?</footer>#s', '', $html) ?? $html;
+        $html = str_replace('@page{margin:0}', '@page{margin:0 0 32mm}', $html);
+        $html = str_replace('</style>', '.brand-side{background:#0b3c46!important;color:#fff!important}</style>', $html);
+        $footer = $this->invoiceFooterHtml($project, $record);
         if (!class_exists(\Mpdf\Mpdf::class)) {
             throw new \RuntimeException('PDF generator is not installed. Run composer install.');
         }
@@ -23,11 +27,13 @@ final class PdfService
                 'margin_left' => 0,
                 'margin_right' => 0,
                 'margin_top' => 0,
-                'margin_bottom' => 0,
+                'margin_bottom' => 32,
+                'margin_footer' => 0,
             ]);
             $mpdf->SetTitle('Factura ' . (string) ($record['numero'] ?? $record['uid'] ?? ''));
             $mpdf->SetAuthor((string) ($project['name'] ?? 'TMPBase'));
             $mpdf->WriteHTML($html);
+            $mpdf->SetHTMLFooter($footer);
             return $mpdf->Output('', 'S');
         } catch (\Throwable $e) {
             throw new \RuntimeException('Could not generate the invoice PDF.', 0, $e);
@@ -143,9 +149,45 @@ final class PdfService
             . '<footer class="footer"><table class="footer-table"><tr><td class="footer-contact"><strong>' . $companyName . '</strong><br>' . $companyAddress . ($companyPhone !== '' ? '<br>Tel: ' . $companyPhone : '') . ($companyEmail !== '' ? '<br>' . $companyEmail : '') . '</td><td class="footer-note">Documento generado desde la última versión sincronizada.<br>Los enlaces compartidos reflejan las modificaciones de la factura.</td></tr></table></footer></main></body></html>';
     }
 
+    private function invoiceFooterHtml(array $project, array $invoice): string
+    {
+        $company = $this->firstIfTable($project, 'empresa');
+        $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $companyName = $e($company['nombre'] ?? $project['name'] ?? 'Empresa');
+        $invoiceNumber = $e($invoice['numero'] ?? $invoice['no_factura'] ?? $invoice['uid'] ?? '');
+        $contact = array_values(array_filter([
+            trim((string) ($company['direccion'] ?? '')),
+            trim((string) ($company['telefono'] ?? '')) !== '' ? 'Tel: ' . trim((string) $company['telefono']) : '',
+            trim((string) ($company['email'] ?? '')),
+        ], static fn (string $value): bool => $value !== ''));
+        $contactHtml = $contact
+            ? implode('<br>', array_map($e, $contact))
+            : 'Documento comercial emitido electronicamente';
+
+        return '<div style="height:27mm;background:#0b3c46;border-top:2.5mm solid #12aeb0;color:#d7eff0;padding:4mm 9mm 3mm;box-sizing:border-box">'
+            . '<table style="width:100%;border-collapse:collapse"><tr>'
+            . '<td style="width:56%;border:0;vertical-align:middle;font-size:8pt;line-height:1.45;color:#d7eff0"><div style="font-size:10pt;font-weight:bold;color:#fff;letter-spacing:.4pt;margin-bottom:1.5mm">' . $companyName . '</div>' . $contactHtml . '</td>'
+            . '<td style="width:44%;border:0;vertical-align:middle;text-align:right;font-size:7.5pt;line-height:1.45;color:#b9d9da"><div style="font-size:10pt;font-weight:bold;color:#fff;letter-spacing:.7pt;margin-bottom:1.5mm">GRACIAS POR SU COMPRA</div>Factura ' . $invoiceNumber . '<br>Documento actualizado en linea &nbsp;|&nbsp; Pagina {PAGENO} de {nbpg}</td>'
+            . '</tr></table></div>';
+    }
+
     private function dgiiVerificationUrl(array $company, array $client, array $invoice, string $ncf, string $securityCode): string
     {
-        $issuerRnc = preg_replace('/\D+/', '', (string) ($company['rnc'] ?? '')) ?? '';
+        if ($ncf === '') {
+            return '';
+        }
+        $stampUrl = html_entity_decode(trim((string) ($invoice['alanube_stamp_url'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if ($this->isTrustedDgiiUrl($stampUrl)) {
+            return $stampUrl;
+        }
+
+        $issuerRnc = preg_replace('/\D+/', '', (string) (
+            $company['rnc']
+            ?? $invoice['rnc_emisor']
+            ?? $invoice['emisor_rnc']
+            ?? $invoice['empresa_rnc']
+            ?? ''
+        )) ?? '';
         if ($issuerRnc === '' || $ncf === '') {
             return '';
         }
@@ -170,6 +212,17 @@ final class PdfService
         }
         return 'https://dgii.gov.do/app/WebApps/ConsultasWeb2/ConsultasWeb/consultas/ncf.aspx?'
             . http_build_query($parameters, '', '&', PHP_QUERY_RFC3986);
+    }
+
+    private function isTrustedDgiiUrl(string $url): bool
+    {
+        if ($url === '' || filter_var($url, FILTER_VALIDATE_URL) === false) {
+            return false;
+        }
+        $parts = parse_url($url);
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        return strtolower((string) ($parts['scheme'] ?? '')) === 'https'
+            && ($host === 'fc.dgii.gov.do' || str_ends_with($host, '.dgii.gov.do'));
     }
 
     private function companyLogoDataUri(array $project, string $value): string
