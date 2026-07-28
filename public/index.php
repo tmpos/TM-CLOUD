@@ -56,6 +56,13 @@ require $root . '/app/helpers.php';
 Env::load($root . '/.env');
 $config = require $root . '/config/app.php';
 
+// Apache internally rewrites root requests to /public/index.php. Flight detects
+// that internal script directory as the public base and otherwise redirects
+// unauthenticated users to /public/, which is intentionally not exposed.
+if (method_exists(Flight::class, 'app')) {
+    Flight::set('flight.base_url', '/');
+}
+
 $remoteAddress = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
 $clientAddress = $remoteAddress;
 if ($remoteAddress !== '' && in_array($remoteAddress, $config['trusted_proxies'] ?? [], true)) {
