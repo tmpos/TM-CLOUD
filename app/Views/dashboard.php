@@ -8,13 +8,19 @@
 <section class="mt-8 grid gap-6 xl:grid-cols-[1.5fr_1fr]">
     <div id="projects" class="card overflow-hidden">
         <div class="flex items-center justify-between border-b border-line p-5"><div><h2 class="font-semibold text-white">Projects</h2><p class="mt-1 text-sm text-slate-500">Independent SQLite databases and API keys.</p></div><button data-dialog-open="#new-project-dialog" class="btn-primary">Create</button></div>
+        <?php if ($projects): ?>
+        <div class="border-b border-line p-4">
+            <input id="project-search" type="search" class="input" placeholder="Buscar proyecto por nombre o slug..." autocomplete="off">
+        </div>
+        <?php endif; ?>
         <?php if (!$projects): ?><div class="p-12 text-center text-sm text-slate-500">No projects yet. Create the first workspace.</div><?php endif; ?>
         <?php foreach ($projects as $project): ?>
-        <a href="/projects/<?= e($project['uid']) ?>" class="flex items-center justify-between border-b border-line/70 p-5 transition hover:bg-white/[.02]">
+        <a href="/projects/<?= e($project['uid']) ?>" data-project-row data-search="<?= e(mb_strtolower($project['name'] . ' ' . $project['slug'])) ?>" class="flex items-center justify-between border-b border-line/70 p-5 transition hover:bg-white/[.02]">
             <div><strong class="text-white"><?= e($project['name']) ?></strong><p class="mt-1 text-xs text-slate-500"><?= e($project['description'] ?: $project['slug']) ?></p></div>
             <span class="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300"><?= e($project['status']) ?></span>
         </a>
         <?php endforeach; ?>
+        <p id="project-search-empty" class="hidden p-8 text-center text-sm text-slate-600">No hay proyectos que coincidan con la busqueda.</p>
     </div>
     <div id="activity" class="card">
         <div class="border-b border-line p-5"><h2 class="font-semibold text-white">Recent activity</h2></div>
@@ -38,3 +44,22 @@
         <button class="btn-primary mt-6 w-full">Create project</button>
     </form>
 </dialog>
+
+<script>
+(function () {
+    var input = document.getElementById('project-search');
+    if (!input) return;
+    var rows = Array.prototype.slice.call(document.querySelectorAll('[data-project-row]'));
+    var empty = document.getElementById('project-search-empty');
+    input.addEventListener('input', function () {
+        var query = input.value.trim().toLowerCase();
+        var visible = 0;
+        rows.forEach(function (row) {
+            var match = row.getAttribute('data-search').indexOf(query) !== -1;
+            row.classList.toggle('hidden', !match);
+            if (match) visible++;
+        });
+        empty.classList.toggle('hidden', visible !== 0);
+    });
+})();
+</script>
