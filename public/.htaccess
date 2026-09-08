@@ -3,6 +3,13 @@ CGIPassAuth On
 RewriteEngine On
 RewriteCond %{HTTP:Authorization} .
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+# La pagina de administracion /system-apps choca con la carpeta real
+# public/system-apps/ (donde se guardan los sistemas subidos): en cuanto esa
+# carpeta existe en disco, la condicion !-d de abajo deja de aplicar para esta
+# ruta exacta y Apache intenta servir la carpeta en vez de pasarla a PHP. Se
+# fuerza a index.php solo para esta ruta exacta; el contenido subido bajo
+# /system-apps/<carpeta>/... sigue sirviendose como archivo estatico normal.
+RewriteRule ^system-apps$ index.php [QSA,L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [QSA,L]
