@@ -83,12 +83,34 @@ final class RecordService
             ->fetchAll();
     }
 
+    /**
+     * Snapshot completo para clientes que mantienen el conjunto de datos en
+     * memoria. Evita COUNT, LIMIT/OFFSET y decenas de rondas HTTP paginadas.
+     */
+    public function snapshot(array $project, string $table): array
+    {
+        $table = Support::identifier($table, 'table name');
+        $this->schema->columns($project, $table);
+        return $this->schema->connection($project)
+            ->query('SELECT * FROM ' . Support::quoteIdentifier($table) . ' ORDER BY id DESC')
+            ->fetchAll();
+    }
+
     public function create(array $project, string $table, array $data, bool $writeLog = true): array
     {
         $db = $this->schema->connection($project);
         $data = $this->sanitize($project, $table, $data, true);
         $now = Support::now();
-        $data['uid'] = trim((string) ($data['uid'] ?? '')) ?: Support::uid('rec_');
+        $providedUid = trim((string) ($data['uid'] ?? ''));
+        // Un cliente desactualizado o con datos locales viejos puede intentar
+        // re-crear (via upsert/bulk) un registro con el mismo uid de algo que
+        // ya se borro aqui. La eliminacion en el servidor es la version
+        // autoritativa: si ese uid ya aparece en el log de borrados, se
+        // rechaza la re-creacion en vez de resucitar el registro.
+        if ($providedUid !== '' && $this->logs->wasDeleted($project['uid'], $table, $providedUid)) {
+            throw new RuntimeException('Record was deleted previously; refusing to recreate it with the same uid.');
+        }
+        $data['uid'] = $providedUid ?: Support::uid('rec_');
         $data['created_at'] = trim((string) ($data['created_at'] ?? '')) ?: $now;
         $data['updated_at'] = trim((string) ($data['updated_at'] ?? '')) ?: $now;
         $columns = array_keys($data);

@@ -48,6 +48,17 @@ final class LogService
         return $sanitized;
     }
 
+    public function wasDeleted(string $projectUid, string $table, string $recordUid): bool
+    {
+        $stmt = $this->db->prepare(
+            'SELECT 1 FROM project_logs
+             WHERE project_uid = ? AND action = ? AND table_name = ? AND record_uid = ?
+             LIMIT 1'
+        );
+        $stmt->execute([$projectUid, 'record.deleted', $table, $recordUid]);
+        return (bool) $stmt->fetchColumn();
+    }
+
     public function deletedSince(string $projectUid, string $since): array
     {
         $stmt = $this->db->prepare(

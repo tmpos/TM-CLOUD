@@ -15,6 +15,7 @@ use App\Services\PdfService;
 use App\Core\PortalAuth;
 use App\Services\LogService;
 use App\Services\ProjectService;
+use App\Services\ProjectSqlApiService;
 use App\Services\RecordService;
 use App\Services\SchemaService;
 use App\Services\LicenseService;
@@ -41,6 +42,7 @@ final class ApiController
         private SharedDocumentService $sharedDocuments,
         private PdfService $pdf,
         private PortalAuth $portalAuth,
+        private ProjectSqlApiService $projectSql,
     ) {
     }
 
@@ -260,7 +262,22 @@ final class ApiController
                 (string) ($input['to'] ?? ''),
                 is_array($input['data'] ?? null) ? $input['data'] : []
             );
-            Flight::json(['data' => $job], 202);
+            if (!empty($input['send_now'])) {
+                $job = $this->mail->deliver($p['uid'], (string) $job['uid']);
+            }
+            Flight::json(['data' => $job], ($job['status'] ?? '') === 'sent' ? 200 : 202);
+        }));
+        Flight::route('POST /api/@project/otp/send', fn ($project) => $this->runProject($project, true, function ($p): void {
+            $input = Http::input();
+            $recipient = (string) ($input['to'] ?? $input['email'] ?? '');
+            $otp = (string) ($input['otp'] ?? $input['code'] ?? '');
+            $this->keys->rateLimitPublic('otp-send:' . $p['uid'], 10, 60);
+            $result = $this->mail->sendOtp($p['uid'], $recipient, $otp, [
+                'company_name' => (string) ($input['company_name'] ?? $p['name']),
+                'purpose' => (string) ($input['purpose'] ?? 'confirmar la operación'),
+                'expires_minutes' => (int) ($input['expires_minutes'] ?? 10),
+            ]);
+            Flight::json(['data' => $result]);
         }));
         Flight::route('GET /api/@project/mail/@uid', fn ($project, $uid) => $this->runProject($project, true, function ($p) use ($uid): void {
             Flight::json(['data' => $this->mail->status($p['uid'], $uid)]);
@@ -331,6 +348,12 @@ final class ApiController
                 ],
             ]);
         }));
+        Flight::route('POST /api/@project/sql', fn ($project) => $this->runProject($project, true, function ($p): void {
+            Flight::json([
+                'success' => true,
+                'data' => $this->projectSql->execute($p, Http::input()),
+            ]);
+        }));
         Flight::route('DELETE /api/@project', fn ($project) => $this->runProject($project, true, function ($p): void {
             $this->projects->delete($p['uid']);
             Flight::json(['data' => ['deleted' => true, 'project_uid' => $p['uid']]]);
@@ -363,16 +386,7 @@ final class ApiController
             Flight::json(['data' => ['deleted' => true, 'uid' => $uid]]);
         }));
         Flight::route('GET /api/@project/schema', fn ($project) => $this->runProject($project, false, function ($p): void {
-            $tables = $this->schema->tables($p);
-            $result = [];
-            foreach ($tables as $table) {
-                $name = $table['name'];
-                $result[$name] = [
-                    'count' => $table['count'],
-                    'columns' => $this->schema->columns($p, $name),
-                ];
-            }
-            Flight::json(['data' => $result]);
+            Flight::json(['data' => $this->schema->fullSchema($p)]);
         }));
         Flight::route('GET /api/@project/schema/tables', fn ($project) => $this->runProject($project, false, function ($p): void {
             Flight::json(['data' => $this->schema->tables($p)]);
@@ -474,9 +488,18 @@ final class ApiController
                 : (array_is_list($input) ? $input : [$input]);
             Flight::json($this->records->bulk($p, $table, $rows, filter_var($input['atomic'] ?? false, FILTER_VALIDATE_BOOL)), 201);
         }));
-        Flight::route('GET /api/@project/@table', fn ($project, $table) => $this->run($project, $table, fn ($p) => Flight::json(
-            $this->records->paginate($p, $table, $_GET)
-        )));
+        Flight::route('GET /api/@project/@table', fn ($project, $table) => $this->run($project, $table, function ($p) use ($table): void {
+            if (filter_var($_GET['all'] ?? false, FILTER_VALIDATE_BOOL)) {
+                $rows = $this->records->snapshot($p, $table);
+                header('X-Total-Count: ' . count($rows));
+                Flight::json([
+                    'data' => $rows,
+                    'meta' => ['mode' => 'all', 'total' => count($rows)],
+                ]);
+                return;
+            }
+            Flight::json($this->records->paginate($p, $table, $_GET));
+        }));
         Flight::route('POST /api/@project/@table', fn ($project, $table) => $this->run($project, $table, function ($p) use ($table): void {
             $record = $this->records->create($p, $table, Http::input());
             $this->webhooks->dispatch('record.created', $p, $table, $record);

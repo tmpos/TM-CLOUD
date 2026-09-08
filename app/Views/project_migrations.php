@@ -1,7 +1,7 @@
 <div class="mb-4 flex items-center gap-3">
   <h3 class="font-semibold text-white">Migrations</h3>
-  <form method="post" action="/projects/<?= e($project['uid']) ?>/migrations/migrate" class="inline"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><button class="btn-primary text-sm">Run pending</button></form>
-  <form method="post" data-confirm="Rollback last batch?" action="/projects/<?= e($project['uid']) ?>/migrations/rollback" class="inline"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><button class="btn-secondary text-sm">Rollback</button></form>
+  <form method="post" action="/projects/<?= e($project['uid']) ?>/migrations/migrate" class="inline"><input type="hidden" name="_csrf" value="<?= e(\App\Core\Csrf::token()) ?>"><button class="btn-primary text-sm">Run pending</button></form>
+  <form method="post" data-confirm="Rollback last batch?" action="/projects/<?= e($project['uid']) ?>/migrations/rollback" class="inline"><input type="hidden" name="_csrf" value="<?= e(\App\Core\Csrf::token()) ?>"><button class="btn-secondary text-sm">Rollback</button></form>
 </div>
 <?php if ($output): ?>
 <div class="mb-4 rounded-xl border border-line bg-black/20 p-4 font-mono text-xs"><?php foreach ($output as $line): ?><div class="<?= str_starts_with($line,'OK') ? 'text-emerald-400' : (str_starts_with($line,'ERROR') ? 'text-rose-400' : 'text-slate-400') ?>"><?= e($line) ?></div><?php endforeach; ?></div>

@@ -46,6 +46,7 @@ $invoice = [
     'id' => 1,
     'uid' => 'rec_invoice',
     'numero' => 'FAC-000005',
+    'no_factura' => '000005',
     'cliente_id' => 1,
     'subtotal' => 3800,
     'descuento_monto' => 0,
@@ -63,10 +64,63 @@ $invoice = [
 
 try {
     $html = $service->invoiceHtml($project, $invoice);
-    foreach (['TM RESTAURANTE', 'E320000000005', 'AJIz2R', 'RncEmisor=133130343', 'MontoTotal=4487.78', 'CodigoSeguridad=AJIz2R', '<barcode'] as $expected) {
+    foreach (['TM RESTAURANTE', '000005', 'E320000000005', 'AJIz2R', 'RncEmisor=133130343', 'MontoTotal=4487.78', 'CodigoSeguridad=AJIz2R', '<barcode'] as $expected) {
         if (!str_contains($html, $expected)) {
             throw new RuntimeException("Invoice HTML is missing: $expected");
         }
+    }
+    if (str_contains($html, 'Factura No.</td><td class="meta-value">FAC-000005')) {
+        throw new RuntimeException('Invoice PDF preferred numero instead of no_factura.');
+    }
+    $inlineInvoice = $invoice;
+    $inlineInvoice['id'] = 2;
+    $inlineInvoice['uid'] = 'rec_inline_invoice';
+    $inlineInvoice['productos'] = json_encode([
+        [
+            'tipo' => 'accesorio',
+            'nombre' => 'GLASS 15 PRO MAX',
+            'codigo' => '9556386583',
+            'cantidad' => 1,
+            'precio' => 150,
+        ],
+        [
+            'tipo' => 'imei',
+            'nombre' => 'IPHONE 11',
+            'codigo' => '333333333333333',
+            'cantidad' => 1,
+            'precio' => 2000,
+            'imei' => '333333333333333',
+            'imeis' => ['333333333333333'],
+            'color' => 'BLACK',
+            'capacidad' => '512GB',
+        ],
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $inlineHtml = $service->invoiceHtml($project, $inlineInvoice);
+    foreach (['GLASS 15 PRO MAX', '150.00', 'IPHONE 11', '2,000.00', 'IMEI: 333333333333333', 'Color: BLACK', 'Capacidad: 512GB'] as $expected) {
+        if (!str_contains($inlineHtml, $expected)) {
+            throw new RuntimeException("Inline invoice product is missing: $expected");
+        }
+    }
+    if (str_contains($inlineHtml, 'Detalle de productos no disponible')) {
+        throw new RuntimeException('Inline invoice products were replaced with the empty detail message.');
+    }
+    $tmposInvoice = $inlineInvoice;
+    unset($tmposInvoice['estado'], $tmposInvoice['created_at'], $tmposInvoice['descuento_monto'], $tmposInvoice['impuesto_monto'], $tmposInvoice['notas']);
+    $tmposInvoice['estado_factura'] = 'ANULADA';
+    $tmposInvoice['fecha_emision'] = '2026-09-07 15:45:00';
+    $tmposInvoice['descuento'] = 125;
+    $tmposInvoice['impuesto'] = 342;
+    $tmposInvoice['nota'] = 'Nota guardada por TMPOS';
+    $tmposHtml = $service->invoiceHtml($project, $tmposInvoice);
+    foreach (['ANULADA', '07/09/2026 03:45 PM', '125.00', '342.00', 'Nota guardada por TMPOS'] as $expected) {
+        if (!str_contains($tmposHtml, $expected)) {
+            throw new RuntimeException("TMPOS invoice field is missing: $expected");
+        }
+    }
+
+    $inlineContent = $service->invoice($project, 'facturas', $inlineInvoice);
+    if (!str_starts_with($inlineContent, '%PDF-') || strlen($inlineContent) < 10000) {
+        throw new RuntimeException('The invoice PDF with inline products is invalid.');
     }
     $content = $service->invoice($project, 'facturas', $invoice);
     if (!str_starts_with($content, '%PDF-') || strlen($content) < 10000) {

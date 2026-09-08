@@ -1,6 +1,12 @@
 Options -Indexes
 RewriteEngine On
 
+# Comprime JSON, JavaScript y estilos. Los snapshots completos suelen reducirse
+# drasticamente en transferencia sin alterar ningun dato de la respuesta.
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE application/json application/javascript text/javascript text/css text/html text/plain
+</IfModule>
+
 # Never expose application code, dependencies, configuration or stored data.
 RewriteRule ^(?:app|config|database|storage|vendor)(?:/|$) - [F,L,NC]
 RewriteRule ^(?:\.env|\.env\.example|composer\.(?:json|lock)|README\.md|prompt\.md|router\.php)$ - [F,L,NC]

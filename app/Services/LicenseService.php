@@ -77,7 +77,7 @@ final class LicenseService
     {
         $allowed = [
             'uid', 'project_uid', 'project_name', 'system_name', 'status', 'max_uses',
-            'current_uses', 'expires_at', 'project_url', 'public_key', 'nombre', 'link',
+            'current_uses', 'expires_at', 'project_url', 'public_key', 'secret_key', 'nombre', 'link',
             'tipo', 'proximopago', 'telefono', 'email', 'direccion', 'rnc',
             'dispositivos', 'equipos_no_autorizados',
             'created_at', 'updated_at',

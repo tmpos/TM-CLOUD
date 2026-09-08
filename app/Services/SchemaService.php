@@ -34,6 +34,70 @@ final class SchemaService
         return $rows;
     }
 
+    // GET /schema combina tables()+columns() para cada tabla: sin cache, cada
+    // llamada dispara un COUNT(*) y varios PRAGMA por tabla. Los clientes lo
+    // piden en cada ciclo de sincronizacion (cada ~60s en cada dispositivo
+    // conectado), asi que con muchas tablas esto se vuelve lento y bloquea el
+    // resto del ciclo de sync (incluidas las eliminaciones pendientes).
+    // Se cachea el resultado combinado por proyecto con un TTL corto: el conteo
+    // es solo informativo (se usa para un mensaje de progreso en el cliente) y
+    // la estructura de columnas cambia con muy poca frecuencia.
+    private const SCHEMA_CACHE_TTL = 30;
+
+    public function fullSchema(array $project): array
+    {
+        $cached = $this->readSchemaCache($project);
+        if ($cached !== null) {
+            return $cached;
+        }
+        $result = [];
+        foreach ($this->tables($project) as $table) {
+            $name = $table['name'];
+            $result[$name] = [
+                'count' => $table['count'],
+                'columns' => $this->columns($project, $name),
+            ];
+        }
+        $this->writeSchemaCache($project, $result);
+        return $result;
+    }
+
+    private function schemaCachePath(array $project): string
+    {
+        return dirname($project['database_path']) . '/schema_cache.json';
+    }
+
+    private function readSchemaCache(array $project): ?array
+    {
+        $path = $this->schemaCachePath($project);
+        if (!is_file($path) || (time() - filemtime($path)) > self::SCHEMA_CACHE_TTL) {
+            return null;
+        }
+        $contents = @file_get_contents($path);
+        if ($contents === false) {
+            return null;
+        }
+        $decoded = json_decode($contents, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    private function writeSchemaCache(array $project, array $result): void
+    {
+        try {
+            @file_put_contents($this->schemaCachePath($project), Support::json($result), LOCK_EX);
+        } catch (\Throwable) {
+            // El cache es una optimizacion; si no se puede escribir, se ignora.
+        }
+    }
+
+    private function invalidateSchemaCache(array $project): void
+    {
+        $path = $this->schemaCachePath($project);
+        if (is_file($path)) {
+            @unlink($path);
+        }
+    }
+
     public function columns(array $project, string $table): array
     {
         $table = Support::identifier($table, 'table name');
@@ -85,6 +149,7 @@ final class SchemaService
             throw $e;
         }
         $this->logs->write('table.created', $project['uid'], $name);
+        $this->invalidateSchemaCache($project);
     }
 
     public function addColumn(array $project, string $table, array $field): void
@@ -95,6 +160,7 @@ final class SchemaService
         $db->exec('ALTER TABLE ' . Support::quoteIdentifier($table) . ' ADD COLUMN ' . $definition);
         $this->createRequestedIndexes($db, $table, [$field]);
         $this->logs->write('field.created', $project['uid'], $table, null, null, $field);
+        $this->invalidateSchemaCache($project);
     }
 
     public function dropColumn(array $project, string $table, string $column): void
@@ -107,6 +173,7 @@ final class SchemaService
         $db = $this->connection($project);
         $db->exec('ALTER TABLE ' . Support::quoteIdentifier($table) . ' DROP COLUMN ' . Support::quoteIdentifier($column));
         $this->logs->write('field.deleted', $project['uid'], $table, null, ['name' => $column]);
+        $this->invalidateSchemaCache($project);
     }
 
     public function truncate(array $project, string $table): void
@@ -133,6 +200,7 @@ final class SchemaService
         $stmt = $db->prepare('DELETE FROM _system_table_settings WHERE table_name = ?');
         $stmt->execute([$table]);
         $this->logs->write('table.deleted', $project['uid'], $table);
+        $this->invalidateSchemaCache($project);
     }
 
     public function accessMode(array $project, string $table): string
@@ -150,6 +218,40 @@ final class SchemaService
         }
         $stmt = $this->connection($project)->prepare('UPDATE _system_table_settings SET access_mode = ?, updated_at = ? WHERE table_name = ?');
         $stmt->execute([$mode, Support::now(), $table]);
+    }
+
+    // Traduce las columnas reales de una tabla (PRAGMA table_info) al formato
+    // de "field" que espera createTable(), para poder recrear la misma
+    // estructura en otro proyecto durante una importacion de tablas.
+    public function importableFields(array $project, string $table): array
+    {
+        $fields = [];
+        foreach ($this->columns($project, $table) as $column) {
+            if (in_array($column['name'], self::PROTECTED, true)) {
+                continue;
+            }
+            $type = in_array($column['type'], ['INTEGER', 'REAL'], true) ? $column['type'] : 'TEXT';
+            $field = [
+                'name' => $column['name'],
+                'type' => $type,
+                'required' => (bool) $column['notnull'],
+                'indexed' => (bool) $column['indexed'],
+                'unique' => (bool) $column['unique'],
+            ];
+            if ($column['dflt_value'] !== null) {
+                $field['default'] = $this->unquoteDefault($type, (string) $column['dflt_value']);
+            }
+            $fields[] = $field;
+        }
+        return $fields;
+    }
+
+    private function unquoteDefault(string $type, string $raw): string
+    {
+        if ($type === 'TEXT' && strlen($raw) >= 2 && $raw[0] === "'" && substr($raw, -1) === "'") {
+            return str_replace("''", "'", substr($raw, 1, -1));
+        }
+        return $raw;
     }
 
     private function columnDefinition(array $field): string

@@ -36,6 +36,14 @@ final class ProjectService
         return $project;
     }
 
+    public function findActiveBySlug(string $slug): array
+    {
+        $slug = Support::slug($slug);
+        $stmt = $this->db->prepare("SELECT * FROM projects WHERE slug = ? AND status = 'active' LIMIT 1");
+        $stmt->execute([$slug]);
+        return $stmt->fetch() ?: throw new RuntimeException('System not found.', 404);
+    }
+
     public function create(array $data): array
     {
         $name = trim((string) ($data['name'] ?? ''));
@@ -65,15 +73,28 @@ final class ProjectService
         $now = Support::now();
         $project = [
             'uid' => $uid, 'name' => $name, 'slug' => $slug,
-            'description' => trim((string) ($data['description'] ?? '')), 'database_path' => $path,
+            'description' => trim((string) ($data['description'] ?? '')), 'system_app' => 'default', 'database_path' => $path,
             'public_key' => Support::apiKey('public'), 'secret_key' => Support::apiKey('secret'),
             'status' => 'active', 'created_at' => $now, 'updated_at' => $now,
         ];
         $stmt = $this->db->prepare(
-            'INSERT INTO projects (uid,name,slug,description,database_path,public_key,secret_key,status,created_at,updated_at)
-             VALUES (:uid,:name,:slug,:description,:database_path,:public_key,:secret_key,:status,:created_at,:updated_at)'
+            'INSERT INTO projects (uid,name,slug,description,system_app,database_path,public_key,secret_key,status,created_at,updated_at)
+             VALUES (:uid,:name,:slug,:description,:system_app,:database_path,:public_key,:secret_key,:status,:created_at,:updated_at)'
         );
         $stmt->execute($project);
+        $this->db->prepare(
+            'INSERT INTO storefronts
+             (uid,project_uid,slug,enabled,store_name,created_at,updated_at)
+             VALUES (?,?,?,?,?,?,?)'
+        )->execute([
+            Support::uid('sto_'),
+            $uid,
+            $slug,
+            1,
+            $name,
+            $now,
+            $now,
+        ]);
         $this->logs->write('project.created', $uid, null, null, null, ['name' => $name, 'slug' => $slug]);
         return $this->find($uid);
     }
@@ -87,6 +108,22 @@ final class ProjectService
         $stmt->execute([$public, $secret, Support::now(), $uid]);
         $this->logs->write('project.keys_regenerated', $uid);
         return $this->find($uid);
+    }
+
+    public function setSystemApp(string $uid, string $systemApp): array
+    {
+        $this->find($uid);
+        $stmt = $this->db->prepare('UPDATE projects SET system_app = ?, updated_at = ? WHERE uid = ?');
+        $stmt->execute([$systemApp, Support::now(), $uid]);
+        $this->logs->write('project.system_app_updated', $uid, null, null, null, ['system_app' => $systemApp]);
+        return $this->find($uid);
+    }
+
+    public function countUsingSystemApp(string $systemApp): int
+    {
+        $stmt = $this->db->prepare('SELECT COUNT(*) FROM projects WHERE system_app = ?');
+        $stmt->execute([$systemApp]);
+        return (int) $stmt->fetchColumn();
     }
 
     public function rotateKey(string $uid, string $type): array
@@ -119,7 +156,7 @@ final class ProjectService
         ]);
         $this->db->beginTransaction();
         try {
-            foreach (['webhooks', 'backups', 'project_logs'] as $table) {
+            foreach (['webhooks', 'backups', 'project_logs', 'storefronts'] as $table) {
                 $stmt = $this->db->prepare("DELETE FROM $table WHERE project_uid = ?");
                 $stmt->execute([$uid]);
             }

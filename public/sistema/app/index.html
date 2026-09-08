@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/x-icon" href="./assets/icon-CSRb-07A.ico" />
+    <title>TMPOS SRL</title>
+    <script type="module" crossorigin src="./assets/index-DqXazgnz.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/chunk-CilyBKbf.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-BrcP9GDf.css">
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'F12') {
+          if (window.electron && window.electron.invoke) {
+            window.electron.invoke('open:devtools').catch(function() {})
+          }
+        }
+      })
+
+      const isElectron = !!(window.electron && window.electron.invoke)
+      const isCapacitor = typeof window.Capacitor !== 'undefined'
+
+      const isProjectSystem = /^\/sistema\/[^/]+\/?$/.test(window.location.pathname)
+      if (!isElectron && !isCapacitor && !isProjectSystem) {
+        // Fallback para acceso via red (browser) - window.db y window.electron via API local
+        console.log('[Browser] Modo red detectado, configurando API via HTTP...')
+        window.__isElectron = false
+        window.__isNetworkClient = true
+        const BASE = window.location.origin
+        const inflightReads = new Map()
+        const readCache = new Map()
+        const READ_CACHE_MS = 2000
+
+        function cloneApiResult(value) {
+          if (typeof structuredClone === 'function') return structuredClone(value)
+          return JSON.parse(JSON.stringify(value))
+        }
+
+        function invalidateTable(tabla) {
+          for (const key of readCache.keys()) {
+            if (key.includes('"tabla":"' + tabla + '"')) readCache.delete(key)
+          }
+        }
+
+        function browserPrint(html) {
+          const win = window.open('', '_blank', 'width=480,height=800')
+          if (!win) { alert('Permite las ventanas emergentes para imprimir el ticket.'); return }
+          win.document.write(html); win.document.close(); win.focus()
+          setTimeout(() => { win.print(); setTimeout(() => win.close(), 500) }, 500)
+        }
+        async function api(action, data = {}, options = {}) {
+          const isRead = action === 'db/getAll' || action === 'db/getById' || action === 'db/getModified' || action === 'db/getWhere'
+          const cacheKey = isRead ? action + ':' + JSON.stringify(data) : ''
+          const cached = cacheKey && readCache.get(cacheKey)
+          if (cached && Date.now() - cached.at < READ_CACHE_MS) return cloneApiResult(cached.value)
+          if (cacheKey && inflightReads.has(cacheKey)) return cloneApiResult(await inflightReads.get(cacheKey))
+
+          const request = (async () => {
+            const controller = new AbortController()
+            const timeout = setTimeout(() => controller.abort(), options.timeout || (isRead ? 15000 : 25000))
+            try {
+              const res = await fetch(BASE + '/api/' + action, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal: controller.signal,
+              })
+              if (!res.ok) throw new Error('HTTP ' + res.status)
+              const value = await res.json()
+              if (cacheKey) readCache.set(cacheKey, { at: Date.now(), value })
+              return value
+            } finally {
+              clearTimeout(timeout)
+            }
+          })()
+          if (cacheKey) inflightReads.set(cacheKey, request)
+          try {
+            return cloneApiResult(await request)
+          } catch (e) {
+            const message = e && e.name === 'AbortError' ? 'La conexión tardó demasiado. Verifica la red e intenta nuevamente.' : e.message
+            console.error('[API Error] ' + action + ':', e)
+            throw new Error(message || 'Error de conexión')
+          } finally {
+            if (cacheKey) inflightReads.delete(cacheKey)
+          }
+        }
+        function getUsuario() { try { return localStorage.getItem('mr_user_usuario') || '' } catch { return '' } }
+        window.db = {
+          getAll: (tabla) => api('db/getAll', { tabla }),
+          getModified: (tabla, desde) => api('db/getModified', { tabla, desde }),
+          getWhere: (tabla, where, params = []) => api('db/getWhere', { tabla, where, params }),
+          getById: (tabla, id) => api('db/getById', { tabla, id }),
+          insert: async (tabla, data) => { const result = await api('db/insert', { tabla, data, usuario: getUsuario() }); invalidateTable(tabla); return result },
+          update: async (tabla, id, data) => { const result = await api('db/update', { tabla, id, data, usuario: getUsuario() }); invalidateTable(tabla); return result },
+          delete: async (tabla, id) => { const result = await api('db/delete', { tabla, id, usuario: getUsuario() }); invalidateTable(tabla); return result },
+          bitacoraList: (limite) => api('db/bitacoraList', { limite }),
+          bitacoraDeleteAll: () => api('db/bitacoraDeleteAll'),
+        }
+        window.config = {
+          get: (clave) => api('config/get', { clave }),
+          set: (clave, valor, categoria = 'general') => api('config/set', { clave, valor, categoria }),
+        }
+        window.electron = {
+          invoke: (channel, ...args) => {
+            if (channel === 'getServerUrl') return Promise.resolve({ success: true, url: BASE })
+            // Mantener la misma interfaz que usa la aplicacion de escritorio.
+            // Varias pantallas (incluido el selector de almacenes) consultan por IPC.
+            if (channel === 'db:getAll') return window.db.getAll(args[0])
+            if (channel === 'db:getById') return window.db.getById(args[0], args[1])
+            if (channel === 'db:getWhere') return window.db.getWhere(args[0], args[1], args[2] || [])
+            if (channel === 'db:getModified') return window.db.getModified(args[0], args[1])
+            if (channel === 'db:insert') return window.db.insert(args[0], args[1])
+            if (channel === 'db:update') return window.db.update(args[0], args[1], args[2])
+            if (channel === 'db:delete') return window.db.delete(args[0], args[1])
+            if (channel === 'db:bitacoraList') return window.db.bitacoraList(args[0])
+            if (channel === 'db:bitacoraDeleteAll') return window.db.bitacoraDeleteAll()
+            if (channel === 'config:get') return window.config.get(args[0])
+            if (channel === 'config:set') return window.config.set(args[0], args[1], args[2])
+            if (channel === 'tmcloud:getConfig') return api('tmcloud/getConfig')
+            if (channel === 'auth:login') return api('auth/login', args[0] || {})
+            if (channel === 'ventas:guardarAtomica') return api('ventas/guardarAtomica', args[0] || {}, { timeout: 30000 })
+            if (channel === 'ventas:cobrarPendiente') {
+              return api('ventas/cobrarPendiente', args[0] || {}, { timeout: 30000 }).then(result => {
+                invalidateTable('facturas'); invalidateTable('bancos'); return result
+              })
+            }
+            if (channel === 'caja:getTurnoActivo' || channel === 'caja:getTurnoAbierto') return api('caja/getTurnoActivo', { almacenUid: args[0] || localStorage.getItem('almacen_uid') || '' })
+            if (channel.startsWith('licencia:')) {
+              if (channel === 'licencia:getMacAddress') return Promise.resolve({ success: true, data: { mac: '000000000000', cifrada: '' } })
+              if (channel === 'licencia:getInfo') return Promise.resolve({ success: true, data: { estado: 'activa', estado_display: 'Activa', nombre_empresa: '', licencia_equipo: '000000000000', dias_restantes: 365, fecha_vencimiento: '', ultima_verificacion: '' } })
+              if (channel === 'licencia:getApiKey') return Promise.resolve({ success: true, data: { configurada: false } })
+              if (channel === 'licencia:setApiKey') return Promise.resolve({ success: true })
+              if (channel === 'licencia:registrar') return Promise.resolve({ success: true, data: { mensaje: 'Licencia registrada correctamente' } })
+              if (channel === 'licencia:verificar') return Promise.resolve({ success: true, estado: 'activo', data: { estado: 'activo', mensaje: 'Licencia activa - 365 dia(s) restantes', diasRestantes: 365 } })
+              return Promise.resolve({ success: false, error: 'No disponible en red' })
+            }
+            if (channel === 'enviar:testEmail') return Promise.resolve({ success: true, message: 'Correo de prueba enviado (simulado)' })
+            if (channel === 'consultaservidor' && args[0] === 'getAllConfig') {
+              return Promise.resolve({ VITE_LINKURL: BASE, VITE_LINK_API: BASE + '/api', VITE_TOKEN: '', VITE_PATRON_TELEFONO: '^[0-9]{10}$', VITE_IMPRESORA_LOCAL: '', VITE_PATRON_CEDULA: '^[0-9]{11}$', VITE_TOKEN_CORTO: '' })
+            }
+            if (channel === 'print:ticket') { browserPrint(args[0]); return Promise.resolve({ success: true }) }
+            if (channel === 'generate:pdf') return Promise.resolve({ success: true, dataUrl: '' })
+            if (channel === 'pdf:generateToFile') return Promise.resolve({ success: true, filePath: '' })
+            if (channel === 'save:pdf') return Promise.resolve({ success: true })
+            if (channel === 'backup:create') return Promise.resolve({ success: true })
+            if (channel === 'getPrinters') return Promise.resolve({ success: true, data: [] })
+            if (channel === 'scan:bluetooth') return Promise.resolve({ success: true, data: [] })
+            console.warn('[Browser] Accion no disponible:', channel, args)
+            return Promise.resolve({ success: false, error: 'No disponible en red' })
+          },
+          send: () => {},
+          on: () => {},
+        }
+        console.log('[Browser] API via HTTP configurada correctamente (ventas-red v2) en:', BASE)
+      }
+    </script>
+  </body>
+</html>

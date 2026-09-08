@@ -15,7 +15,7 @@ Env::load($root . '/.env');
 $config = require $root . '/config/app.php';
 $db = Database::connect($config['database']);
 Database::migrate($db);
-$mail = new MailService($db, $config['mail'] ?? [], new LogService($db));
+$mail = new MailService($db, $config['mail'] ?? [], new LogService($db), $config['storage']);
 
 try {
     $result = $mail->process((int) ($argv[1] ?? 20));

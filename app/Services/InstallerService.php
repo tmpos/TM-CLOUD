@@ -156,7 +156,7 @@ final class InstallerService
             'APP_DEBUG=false',
             'SESSION_SECURE=' . $secure,
             'MAX_UPLOAD_MB=10',
-            'RATE_LIMIT_PER_MINUTE=120',
+            'RATE_LIMIT_PER_MINUTE=300',
             '',
         ]);
 

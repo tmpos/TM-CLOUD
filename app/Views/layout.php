@@ -32,10 +32,14 @@ $flashes = $flashes ?? [];
             <a href="/dashboard" class="nav-link">Dashboard</a>
             <a href="/dashboard#projects" class="nav-link">Projects</a>
             <a href="/dashboard#activity" class="nav-link">Activity</a>
+            <a href="/sistema" class="nav-link">Sistema TMPOS</a>
+            <a href="/system-apps" class="nav-link">Sistemas web</a>
             <div class="px-3 pb-2 pt-6 text-xs font-semibold uppercase tracking-widest text-slate-600">Workspace</div>
             <a href="/api-docs" class="nav-link">API Docs</a>
             <a href="/backups" class="nav-link">Backups</a>
             <a href="/storage" class="nav-link">Storage</a>
+            <a href="/apk-files" class="nav-link">Archivos APK</a>
+            <a href="/mail-settings" class="nav-link">Correo OTP</a>
             <a href="/licenses" class="nav-link">Licenses</a>
         </nav>
         <div class="absolute inset-x-4 bottom-4 rounded-xl border border-line bg-panel p-3 text-xs text-slate-400">

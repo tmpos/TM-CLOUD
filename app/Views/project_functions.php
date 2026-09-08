@@ -10,8 +10,8 @@
   <?php if ($fn['description']): ?><p class="mt-2 text-xs text-slate-500"><?= e($fn['description']) ?></p><?php endif; ?>
   <div class="mt-3 flex gap-2">
     <a class="btn-secondary text-xs px-2 py-1" href="/projects/<?= e($project['uid']) ?>/functions/<?= e($fn['uid']) ?>/edit">Edit</a>
-    <form method="post" action="/projects/<?= e($project['uid']) ?>/functions/<?= e($fn['uid']) ?>/toggle" class="inline"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><button class="btn-secondary text-xs px-2 py-1"><?= $fn['is_active'] ? 'Deactivate' : 'Activate' ?></button></form>
-    <form method="post" data-confirm="Delete this function?" action="/projects/<?= e($project['uid']) ?>/functions/<?= e($fn['uid']) ?>/delete" class="inline"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><button class="btn-danger text-xs px-2 py-1">Del</button></form>
+    <form method="post" action="/projects/<?= e($project['uid']) ?>/functions/<?= e($fn['uid']) ?>/toggle" class="inline"><input type="hidden" name="_csrf" value="<?= e(\App\Core\Csrf::token()) ?>"><button class="btn-secondary text-xs px-2 py-1"><?= $fn['is_active'] ? 'Deactivate' : 'Activate' ?></button></form>
+    <form method="post" data-confirm="Delete this function?" action="/projects/<?= e($project['uid']) ?>/functions/<?= e($fn['uid']) ?>/delete" class="inline"><input type="hidden" name="_csrf" value="<?= e(\App\Core\Csrf::token()) ?>"><button class="btn-danger text-xs px-2 py-1">Del</button></form>
   </div>
 </article>
 <?php endforeach; ?>
@@ -19,7 +19,7 @@
 <?php else: ?>
 <div class="card py-16 text-center"><p class="font-semibold text-slate-300">No functions yet.</p><p class="mt-2 text-sm text-slate-500">Create serverless functions that run on database events or API calls.</p></div>
 <?php endif; ?>
-<dialog id="fn-dialog" class="w-full max-w-2xl rounded-2xl border border-line bg-panel p-0 text-slate-200"><form class="p-6" method="post" action="/projects/<?= e($project['uid']) ?>/functions"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><div class="mb-5 flex justify-between"><h3 class="font-semibold text-white">New function</h3><button type="button" data-dialog-close>Close</button></div>
+<dialog id="fn-dialog" class="w-full max-w-2xl rounded-2xl border border-line bg-panel p-0 text-slate-200"><form class="p-6" method="post" action="/projects/<?= e($project['uid']) ?>/functions"><input type="hidden" name="_csrf" value="<?= e(\App\Core\Csrf::token()) ?>"><div class="mb-5 flex justify-between"><h3 class="font-semibold text-white">New function</h3><button type="button" data-dialog-close>Close</button></div>
 <div class="space-y-4">
 <label><span class="label">Name</span><input class="input" name="name" required placeholder="my_function"></label>
 <label><span class="label">Event trigger (optional)</span><select class="input" name="event"><option value="">Manual only</option><option value="record.created">record.created</option><option value="record.updated">record.updated</option><option value="record.deleted">record.deleted</option></select></label>

@@ -1,5 +1,11 @@
 # TMPBase
 
+## TMPOS completo en el navegador
+
+TMPBase incluye ahora el sistema empresarial en **`/sistema`**. Cada usuario ve solamente las empresas asignadas en `project_memberships`, y cada empresa trabaja sobre su propia base SQLite. Las claves privadas del proyecto nunca se envían al navegador.
+
+La instalación, roles y publicación de la interfaz están documentados en [`docs/SISTEMA-WEB.md`](docs/SISTEMA-WEB.md).
+
 TMPBase es una plataforma backend privada construida con PHP, SQLite y FlightPHP. Cada proyecto tiene su propia base de datos SQLite, claves API y endpoints REST automáticos.
 
 ## Requisitos
@@ -47,6 +53,39 @@ MAIL_FROM_ADDRESS=mailer@example.com
 ```
 
 Las credenciales SMTP pertenecen exclusivamente al servidor. Los clientes instalados solicitan mensajes controlados mediante licencia y equipo autorizado; nunca reciben ni almacenan la contraseña SMTP.
+
+También pueden configurarse desde el panel autenticado en `/mail-settings`. Para Gmail usa `smtp.gmail.com`, puerto `587`, TLS y una contraseña de aplicación de Google; TMPBase cifra esa contraseña antes de guardarla.
+
+Los cierres de caja usan la plantilla `cash_closing` y pueden solicitar entrega inmediata con `"send_now": true`. Configura además una tarea programada que ejecute `php bin/mail-worker 20` cada minuto; así los mensajes que fallen temporalmente se reintentan desde la cola.
+
+El payload del cierre puede incluir `workshop_orders` (o `ordenes_taller`) y `accounts_receivable` (o `cuentas_por_cobrar`). El correo presenta ambos módulos por separado con total, cobrado/abonado y saldo pendiente. Ejemplo abreviado:
+
+```json
+{
+  "template": "cash_closing",
+  "send_now": true,
+  "data": {
+    "sales_total": 125000,
+    "workshop_orders": [
+      {"no_orden":"OT-15","cliente":"ANA","equipo":"IPHONE 13","estado":"LISTO","total":5000,"abono":3000,"pendiente":2000}
+    ],
+    "accounts_receivable": [
+      {"no_factura":"FAC-20","cliente":"CARLOS","total":10000,"abonado":4000,"saldo":6000,"fecha_vencimiento":"2026-08-15"}
+    ]
+  }
+}
+```
+
+Para enviar un OTP directamente desde un sistema cliente usa la clave secreta del proyecto:
+
+```bash
+curl -X POST "https://api.example.com/api/PROJECT_UID/otp/send" \
+  -H "Authorization: Bearer YOUR_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"to":"cliente@example.com","otp":"4821","purpose":"autorizar una eliminacion","expires_minutes":10,"company_name":"Mi Empresa"}'
+```
+
+El endpoint acepta códigos numéricos de 4 a 8 dígitos, aplica límites de solicitudes y responde después de que el servidor SMTP acepta el mensaje.
 
 El portal empresarial se abre en `/portal/login`. Un administrador crea miembros con `POST /api/{project}/portal/users` usando la clave secreta del proyecto. Desde el portal se consultan facturas, clientes, productos y categorías según la membresía.
 
@@ -174,6 +213,38 @@ En `Settings` de cada tabla puede elegir:
 La clave secreta permite operaciones destructivas. No debe incluirse en aplicaciones cliente ni repositorios públicos.
 
 ## API REST
+
+### SQL remoto para backends
+
+`POST /api/{project}/sql` permite conservar aplicaciones existentes que ya usan consultas SQLite complejas, joins y transacciones. Exige la clave secreta y solo debe llamarse desde un backend confiable; nunca desde el navegador ni desde una aplicacion distribuida.
+
+Consulta parametrizada:
+
+```bash
+curl -X POST "https://base.example.com/api/prj_xxx/sql" \
+  -H "Authorization: Bearer tmp_secret_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"operation":"query","sql":"SELECT * FROM productos WHERE activo = ?","params":[1]}'
+```
+
+Operaciones aceptadas:
+
+- `query`: devuelve todas las filas de una consulta de lectura.
+- `get`: devuelve la primera fila o `null`.
+- `run`: ejecuta una escritura o cambio de esquema y devuelve `changes` y `lastInsertRowid`.
+- `transaction`: recibe `queries` y confirma todo o revierte todo si una operacion falla.
+
+```json
+{
+  "operation": "transaction",
+  "queries": [
+    {"sql": "INSERT INTO ordenes (cliente_id, total) VALUES (?, ?)", "params": [15, 1200]},
+    {"sql": "UPDATE clientes SET balance = balance + ? WHERE id = ?", "params": [1200, 15]}
+  ]
+}
+```
+
+Cada elemento admite una sentencia y hasta 1,000 parametros; una transaccion acepta hasta 100 elementos. Se bloquean operaciones capaces de salir de la base aislada del proyecto, como `ATTACH`, `DETACH`, `VACUUM` y `load_extension`. Los valores deben enviarse en `params`, no concatenarse dentro del SQL.
 
 Use la clave correspondiente en el encabezado:
 
@@ -364,3 +435,27 @@ storage/           Base central, bases de proyectos, backups y archivos
 ```
 
 TMPBase crea y migra automáticamente la base de datos central durante el arranque.
+
+## Tienda web automática por proyecto
+
+Cada proyecto crea automáticamente una tienda pública en:
+
+```text
+https://base.example.com/store/{project_slug}
+```
+
+La tienda detecta tablas habituales como `productos`, `accesorios`, `inventario`, `articulos` o `items`. Solo publica nombre, descripción, precio, imagen, categoría, disponibilidad y SKU; nunca entrega costo, claves, IMEI ni el registro completo.
+
+Desde el proyecto, pulse `Tienda web` para configurar nombre, colores, logo, contacto, WhatsApp, moneda y tabla de catálogo.
+
+Endpoints públicos:
+
+```text
+GET /api/storefront/{slug}
+GET /api/storefront/{slug}/products?q=&category=
+GET /api/storefront/{slug}/products/{product_uid}
+```
+
+El cliente puede registrarse en `/store/{slug}/register`. Recibe un OTP de seis dígitos por correo y debe activarlo antes de entrar con su cédula o comprar. La sesión privada permanece activa hasta cerrar sesión y sus datos se reutilizan en el checkout.
+
+Cada producto tiene una página independiente en `/store/{slug}/products/{product_uid}` con galería, descripción, especificaciones seguras y productos relacionados. El carrito se mantiene entre páginas en `/store/{slug}/cart`. Para completar una compra se exige una cuenta activada y un correo válido; cada orden intenta enviar inmediatamente una confirmación al cliente y otra notificación al correo de la tienda, conservando ambos mensajes en cola para reintentos. El trabajador `php bin/mail-worker 20` debe ejecutarse cada minuto para procesar fallos temporales.

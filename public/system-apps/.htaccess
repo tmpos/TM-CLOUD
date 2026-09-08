@@ -1,0 +1,6 @@
+Options -Indexes
+DirectoryIndex disabled
+
+<FilesMatch "^(?:index\.html|\.system-app\.json)$">
+    Require all denied
+</FilesMatch>

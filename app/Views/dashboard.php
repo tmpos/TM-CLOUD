@@ -33,6 +33,7 @@
             <label><span class="label">Name</span><input class="input" name="name" required maxlength="100"></label>
             <label><span class="label">Slug (optional)</span><input class="input" name="slug" pattern="[A-Za-z0-9_-]+"></label>
             <label><span class="label">Description</span><textarea class="input" name="description" rows="3"></textarea></label>
+            <label><span class="label">Ubicacion del sistema</span><select class="input" name="system_app" required><?php foreach ($systemApps as $systemApp): ?><option value="<?= e($systemApp['slug']) ?>"><?= e($systemApp['name']) ?> — <?= e($systemApp['url']) ?></option><?php endforeach; ?></select></label>
         </div>
         <button class="btn-primary mt-6 w-full">Create project</button>
     </form>

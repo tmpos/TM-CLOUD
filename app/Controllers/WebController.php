@@ -16,11 +16,14 @@ use App\Services\ProjectService;
 use App\Services\RecordService;
 use App\Services\SchemaService;
 use App\Services\StorageService;
+use App\Services\ApkFileService;
+use App\Services\SystemAppService;
 use App\Services\LicenseService;
 use App\Services\FunctionService;
 use App\Services\MetricsService;
 use App\Services\MigrationService;
 use App\Services\PdfService;
+use App\Services\MailService;
 use App\Services\WebhookService;
 use App\Services\DatabaseBridgeService;
 use Flight;
@@ -47,6 +50,9 @@ final class WebController
         private FunctionService $functions,
         private MetricsService $metrics,
         private MigrationService $migrations,
+        private MailService $mail,
+        private ApkFileService $apkFiles,
+        private SystemAppService $systemApps,
     ) {
     }
 
@@ -74,12 +80,67 @@ final class WebController
         Flight::route('GET /api-docs', fn () => $this->page(fn () => $this->apiDocs()));
         Flight::route('GET /backups', fn () => $this->page(fn () => $this->backupsPage()));
         Flight::route('GET /storage', fn () => $this->page(fn () => $this->storagePage()));
+        Flight::route('GET /apk-files', fn () => $this->page(fn () => $this->apkFilesPage()));
+        Flight::route('GET /apk-files/upload', fn () => $this->page(fn () => $this->apkUploadPage()));
+        Flight::route('POST /apk-files/upload', fn () => $this->action(function (): void {
+            $file = $this->apkFiles->upload($_FILES['file'] ?? []);
+            Http::flash('success', 'APK subido correctamente: ' . $file['original_name']);
+            Flight::redirect('/apk-files');
+        }));
+        Flight::route('POST /apk-files/@name/delete', fn (string $name) => $this->action(function () use ($name): void {
+            $this->apkFiles->delete($name);
+            Http::flash('success', 'Archivo APK eliminado.');
+            Flight::redirect('/apk-files');
+        }));
+        Flight::route('GET /api/apk-files/latest', fn () => $this->apkLatestApi());
+        Flight::route('GET /api/apk-files', fn () => Flight::json(['data' => array_map(
+            fn (array $file): array => $this->apkFiles->apiData($file),
+            $this->apkFiles->all()
+        )]));
+        Flight::route('GET /downloads/apk/latest', fn () => $this->serveApk(null));
+        Flight::route('GET /downloads/apk/@uid', fn (string $uid) => $this->serveApk($uid));
+        Flight::route('GET /system-apps', fn () => $this->page(fn () => $this->systemAppsPage()));
+        Flight::route('POST /system-apps/upload', fn () => $this->action(function (array $in): void {
+            $app = $this->systemApps->upload($_FILES['file'] ?? [], $in);
+            Http::flash('success', 'Sistema subido correctamente en la carpeta ' . $app['slug'] . '.');
+            Flight::redirect('/system-apps');
+        }));
+        Flight::route('POST /system-apps/@slug/delete', fn (string $slug) => $this->action(function () use ($slug): void {
+            if ($this->projects->countUsingSystemApp($slug) > 0) {
+                throw new \RuntimeException('No se puede eliminar: hay proyectos usando esta ubicacion.');
+            }
+            $this->systemApps->delete($slug);
+            Http::flash('success', 'Carpeta del sistema eliminada.');
+            Flight::redirect('/system-apps');
+        }));
+        Flight::route('GET /mail-settings', fn () => $this->page(fn () => $this->mailSettingsPage()));
+        Flight::route('POST /mail-settings', fn () => $this->action(function (array $in): void {
+            $this->mail->saveSettings($in);
+            Http::flash('success', 'Configuración de correo guardada.');
+            Flight::redirect('/mail-settings');
+        }));
+        Flight::route('POST /mail-settings/test', fn () => $this->action(function (array $in): void {
+            $recipient = trim((string) ($in['to'] ?? ''));
+            $this->mail->sendTest($recipient);
+            Http::flash('success', 'Correo OTP de prueba enviado a ' . $recipient . '.');
+            Flight::redirect('/mail-settings');
+        }));
         Flight::route('POST /projects', fn () => $this->action(function (array $in): void {
+            $systemApp = (string) ($in['system_app'] ?? 'default');
+            $this->systemApps->find($systemApp);
             $project = $this->projects->create($in);
+            if ($systemApp !== 'default') $project = $this->projects->setSystemApp((string) $project['uid'], $systemApp);
             Http::flash('success', 'Project created.');
             Flight::redirect('/projects/' . $project['uid']);
         }));
         Flight::route('GET /projects/@uid', fn (string $uid) => $this->page(fn () => $this->project($uid)));
+        Flight::route('POST /projects/@uid/system-app', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $systemApp = (string) ($in['system_app'] ?? 'default');
+            $this->systemApps->find($systemApp);
+            $this->projects->setSystemApp($uid, $systemApp);
+            Http::flash('success', 'Ubicacion del sistema actualizada.');
+            Flight::redirect('/projects/' . $uid . '?tab=settings');
+        }));
         Flight::route('POST /projects/@uid/database/connections', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
             $connection = $this->databaseBridge->create($uid, $in);
             Http::flash('success', 'MySQL connection created and verified.');
@@ -130,6 +191,72 @@ final class WebController
             $this->webhooks->dispatch('table.created', $project, (string) $in['name'], null);
             Http::flash('success', 'Table created.');
             Flight::redirect('/projects/' . $uid . '/tables/' . $in['name']);
+        }));
+        Flight::route('GET /projects/@uid/tables/import', fn (string $uid) => $this->page(fn () => $this->importTablesPage($uid)));
+        Flight::route('POST /projects/@uid/tables/import', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $target = $this->projects->find($uid);
+            $sourceUid = (string) ($in['source_project'] ?? '');
+            if ($sourceUid === '' || $sourceUid === $uid) {
+                throw new \InvalidArgumentException('Select a different source project.');
+            }
+            $source = $this->projects->find($sourceUid);
+            $tableNames = array_values(array_unique(array_filter((array) ($in['tables'] ?? []), fn ($t) => is_string($t) && $t !== '')));
+            if (!$tableNames) {
+                throw new \InvalidArgumentException('Select at least one table to import.');
+            }
+            $withData = !empty($in['with_data']);
+            $sourceTableNames = array_column($this->schema->tables($source), 'name');
+            $existing = array_column($this->schema->tables($target), 'name');
+            $imported = [];
+            $skipped = [];
+            $rowsInserted = 0;
+            $rowsFailed = 0;
+            foreach ($tableNames as $name) {
+                if (!in_array($name, $sourceTableNames, true) || in_array($name, $existing, true)) {
+                    $skipped[] = $name;
+                    continue;
+                }
+                $fields = $this->schema->importableFields($source, $name);
+                $this->schema->createTable($target, $name, $fields);
+                $this->schema->setAccessMode($target, $name, $this->schema->accessMode($source, $name));
+                if ($withData) {
+                    $rows = $this->records->all($source, $name);
+                    foreach ($rows as &$row) {
+                        unset($row['id']);
+                    }
+                    unset($row);
+                    foreach (array_chunk($rows, 500) as $chunk) {
+                        $result = $this->records->bulk($target, $name, $chunk, false);
+                        $rowsInserted += $result['inserted'];
+                        $rowsFailed += $result['failed'];
+                    }
+                }
+                $this->webhooks->dispatch('table.created', $target, $name, null);
+                $imported[] = $name;
+                $existing[] = $name;
+            }
+            foreach ($imported as $name) {
+                foreach ($this->schema->foreignKeys($source, $name) as $fk) {
+                    if (in_array($fk['ref_table'], $existing, true)) {
+                        try {
+                            $this->schema->addForeignKey($target, $name, $fk['column_name'], $fk['ref_table'], $fk['ref_column'], $fk['on_delete']);
+                        } catch (\Throwable) {
+                        }
+                    }
+                }
+            }
+            $message = count($imported) . ' table(s) imported.';
+            if ($withData) {
+                $message .= " $rowsInserted record(s) copied.";
+                if ($rowsFailed) {
+                    $message .= " $rowsFailed record(s) failed to copy.";
+                }
+            }
+            if ($skipped) {
+                $message .= ' Skipped (already exist or not found): ' . implode(', ', $skipped) . '.';
+            }
+            Http::flash($skipped || $rowsFailed ? 'warning' : 'success', $message);
+            Flight::redirect("/projects/$uid?tab=tables");
         }));
         Flight::route('GET /projects/@uid/tables/@table', fn (string $uid, string $table) => $this->page(fn () => $this->table($uid, $table)));
         Flight::route('POST /projects/@uid/tables/@table/images/@file/delete', fn (string $uid, string $table, string $file) => $this->action(function () use ($uid, $table, $file): void {
@@ -248,6 +375,28 @@ final class WebController
             Http::flash('success', "$dropped tables deleted.");
             Flight::redirect("/projects/$uid");
         }));
+        Flight::route('POST /projects/@uid/tables/truncate-bulk', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $project = $this->projects->find($uid);
+            $tableNames = array_values(array_unique(array_filter((array) ($in['tables'] ?? []), fn ($t) => is_string($t) && $t !== '')));
+            if (!$tableNames) {
+                throw new \InvalidArgumentException('Select at least one table to empty.');
+            }
+            $existing = array_column($this->schema->tables($project), 'name');
+            $emptied = 0;
+            $imagesDeleted = 0;
+            foreach ($tableNames as $name) {
+                if (!in_array($name, $existing, true) || str_starts_with($name, '_')) {
+                    continue;
+                }
+                $rows = $this->records->all($project, $name);
+                $this->schema->truncate($project, $name);
+                $imagesDeleted += $this->storage->deleteImagesFromRowsIfUnreferenced($project, $rows);
+                $this->webhooks->dispatch('table.truncated', $project, $name, null);
+                $emptied++;
+            }
+            Http::flash('success', "$emptied table(s) emptied; $imagesDeleted unreferenced image(s) deleted.");
+            Flight::redirect("/projects/$uid?tab=tables");
+        }));
         Flight::route('POST /projects/@uid/tables/@table/import', fn (string $uid, string $table) => $this->action(function () use ($uid, $table): void {
             $file = $_FILES['file'] ?? null;
             if (!$file || ($file['error'] ?? 1) !== UPLOAD_ERR_OK) {
@@ -277,8 +426,9 @@ final class WebController
             Http::flash('success', 'Backup deleted.');
             Flight::redirect("/projects/$uid?tab=backups");
         }));
-        Flight::route('POST /projects/@uid/storage', fn (string $uid) => $this->action(function () use ($uid): void {
-            $this->storage->upload($this->projects->find($uid), $_FILES['file'] ?? []);
+        Flight::route('POST /projects/@uid/storage', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $directory = trim((string) ($in['directory'] ?? '/'));
+            $this->storage->upload($this->projects->find($uid), $_FILES['file'] ?? [], $directory !== '' ? $directory : '/');
             Http::flash('success', 'File uploaded.');
             Flight::redirect("/projects/$uid?tab=storage");
         }));
@@ -469,6 +619,76 @@ final class WebController
         ]);
     }
 
+    private function apkFilesPage(): void
+    {
+        View::render('apk-files', [
+            'title' => 'Archivos APK',
+            'files' => $this->apkFiles->all(),
+            'baseUrl' => rtrim((string) $this->config['url'], '/'),
+            'flashes' => Http::flashes(),
+        ]);
+    }
+
+    private function apkUploadPage(): void
+    {
+        View::render('apk-upload', [
+            'title' => 'Subir APK',
+            'maxUploadMb' => round((int) ($this->config['apk_max_upload_bytes'] ?? (250 * 1048576)) / 1048576),
+            'baseUrl' => rtrim((string) $this->config['url'], '/'),
+            'flashes' => Http::flashes(),
+        ]);
+    }
+
+    private function systemAppsPage(): void
+    {
+        $apps = $this->systemApps->all();
+        foreach ($apps as &$app) {
+            $app['project_count'] = $this->projects->countUsingSystemApp((string) $app['slug']);
+        }
+        unset($app);
+        View::render('system-apps', [
+            'title' => 'Sistemas web',
+            'apps' => $apps,
+            'maxUploadMb' => round((int) ($this->config['system_app_max_upload_bytes'] ?? (500 * 1048576)) / 1048576),
+            'flashes' => Http::flashes(),
+        ]);
+    }
+
+    private function apkLatestApi(): void
+    {
+        try {
+            Flight::json(['data' => $this->apkFiles->apiData($this->apkFiles->latest())]);
+        } catch (\Throwable $e) {
+            Http::error($e, 404);
+        }
+    }
+
+    private function serveApk(?string $uid): void
+    {
+        try {
+            $file = $uid === null ? $this->apkFiles->latest() : $this->apkFiles->find($uid);
+            $safeName = preg_replace('/[^A-Za-z0-9._-]/', '_', basename((string) $file['original_name'])) ?: 'aplicacion.apk';
+            header('Content-Type: application/vnd.android.package-archive');
+            header('Content-Disposition: attachment; filename="' . $safeName . '"');
+            header('Content-Length: ' . (int) $file['size']);
+            header('X-Content-Type-Options: nosniff');
+            header('Cache-Control: public, max-age=3600');
+            readfile((string) $file['file_path']);
+            exit;
+        } catch (\Throwable $e) {
+            Http::error($e, 404);
+        }
+    }
+
+    private function mailSettingsPage(): void
+    {
+        View::render('mail-settings', [
+            'title' => 'Correo OTP',
+            'settings' => $this->mail->settings(),
+            'flashes' => Http::flashes(),
+        ]);
+    }
+
     private function licensesPage(): void
     {
         $projects = $this->projects->all();
@@ -493,6 +713,7 @@ final class WebController
         View::render('dashboard', [
             'title' => 'Dashboard', 'projects' => $projects, 'projectCount' => count($projects),
             'tableCount' => $tables, 'recordCount' => $records, 'logs' => $this->logs->recent(null, 12),
+            'systemApps' => $this->systemApps->all(),
             'flashes' => Http::flashes(),
         ]);
     }
@@ -558,6 +779,7 @@ final class WebController
             'storageHuman' => $storageHuman($storageUsage['total']),
             'requestsTimeline' => $requestsTimeline,
             'fnCount' => count($this->functions->all($uid)),
+            'systemApps' => $this->systemApps->all(),
         ]);
     }
 
@@ -568,6 +790,20 @@ final class WebController
         $to = $_GET['to'] ?? null;
         $data = $this->records->modified($project, $table, $from, $to);
         Flight::json(['data' => $data, 'server_time' => date('Y-m-d H:i:s')]);
+    }
+
+    private function importTablesPage(string $uid): void
+    {
+        $project = $this->projects->find($uid);
+        $projects = array_values(array_filter($this->projects->all(), fn (array $p) => $p['uid'] !== $uid));
+        $sourceUid = (string) ($_GET['source'] ?? '');
+        $source = $sourceUid !== '' ? $this->projects->find($sourceUid) : null;
+        View::render('project_import_tables', [
+            'title' => 'Import tables', 'project' => $project, 'projects' => $projects,
+            'source' => $source, 'sourceTables' => $source ? $this->schema->tables($source) : [],
+            'existing' => array_column($this->schema->tables($project), 'name'),
+            'flashes' => Http::flashes(),
+        ]);
     }
 
     private function table(string $uid, string $table): void
