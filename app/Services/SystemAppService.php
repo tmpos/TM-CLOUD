@@ -125,6 +125,68 @@ final class SystemAppService
         return $this->find($slug);
     }
 
+    /** Reemplaza por completo la interfaz por defecto (public/sistema/app) con
+     * el contenido de un ZIP (el build de /dist comprimido). Extrae primero a
+     * una carpeta temporal y valida que tenga un index.html antes de tocar la
+     * carpeta en vivo; si el intercambio falla a medio camino, se restaura la
+     * version anterior en vez de dejar la carpeta vacia o a medio subir.
+     */
+    public function replaceDefault(array $file): void
+    {
+        if (!class_exists(ZipArchive::class)) {
+            throw new RuntimeException('El servidor necesita la extension PHP Zip para subir sistemas.');
+        }
+        $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK || empty($file['tmp_name']) || !is_uploaded_file((string) $file['tmp_name'])) {
+            throw new InvalidArgumentException($this->uploadError($error));
+        }
+        $max = (int) ($this->config['system_app_max_upload_bytes'] ?? 536870912);
+        $size = (int) ($file['size'] ?? 0);
+        if ($size <= 0 || $size > $max) {
+            throw new InvalidArgumentException('El ZIP supera el limite permitido de ' . round($max / 1048576) . ' MB.');
+        }
+        if (strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION)) !== 'zip') {
+            throw new InvalidArgumentException('Suba el proyecto web compilado en un archivo ZIP.');
+        }
+
+        $target = $this->legacyPath();
+        $parent = dirname($target);
+        if (!is_dir($parent) && !mkdir($parent, 0775, true) && !is_dir($parent)) {
+            throw new RuntimeException('No se pudo preparar la carpeta del sistema.');
+        }
+        $staging = $parent . DIRECTORY_SEPARATOR . '.replace-' . bin2hex(random_bytes(8));
+        if (!mkdir($staging, 0775, true) && !is_dir($staging)) throw new RuntimeException('No se pudo preparar la carpeta de subida.');
+
+        $zip = new ZipArchive();
+        $zipOpen = false;
+        $backup = $parent . DIRECTORY_SEPARATOR . '.backup-' . bin2hex(random_bytes(8));
+        $backedUp = false;
+        try {
+            if ($zip->open((string) $file['tmp_name']) !== true) throw new InvalidArgumentException('El archivo ZIP no es valido.');
+            $zipOpen = true;
+            $this->extractStaticFiles($zip, $staging);
+            $zip->close();
+            $zipOpen = false;
+            $source = $this->findAppRoot($staging);
+
+            if (is_dir($target)) {
+                if (!rename($target, $backup)) throw new RuntimeException('No se pudo retirar la version anterior.');
+                $backedUp = true;
+            }
+            if (!rename($source, $target)) {
+                if ($backedUp) rename($backup, $target);
+                throw new RuntimeException('No se pudo publicar la nueva version.');
+            }
+            if (is_dir($staging)) $this->removeDirectory($staging);
+            if ($backedUp && is_dir($backup)) $this->removeDirectory($backup);
+        } catch (\Throwable $e) {
+            if ($zipOpen) $zip->close();
+            if (is_dir($staging)) $this->removeDirectory($staging);
+            if ($backedUp && is_dir($backup) && !is_dir($target)) rename($backup, $target);
+            throw $e;
+        }
+    }
+
     public function delete(string $slug): void
     {
         $slug = $this->normalizeSlug($slug);

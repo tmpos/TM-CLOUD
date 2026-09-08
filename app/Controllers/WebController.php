@@ -105,6 +105,11 @@ final class WebController
             Http::flash('success', 'Sistema subido correctamente en la carpeta ' . $app['slug'] . '.');
             Flight::redirect('/system-apps');
         }));
+        Flight::route('POST /system-apps/default/replace', fn () => $this->action(function (): void {
+            $this->systemApps->replaceDefault($_FILES['file'] ?? []);
+            Http::flash('success', 'Interfaz por defecto reemplazada correctamente.');
+            Flight::redirect('/system-apps');
+        }));
         Flight::route('POST /system-apps/@slug/delete', fn (string $slug) => $this->action(function () use ($slug): void {
             if ($this->projects->countUsingSystemApp($slug) > 0) {
                 throw new \RuntimeException('No se puede eliminar: hay proyectos usando esta ubicacion.');

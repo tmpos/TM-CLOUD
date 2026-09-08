@@ -22,7 +22,9 @@
             <p class="mt-4 flex-1 text-sm text-slate-500"><?= e($app['description'] ?: 'Sin descripcion.') ?></p>
             <div class="mt-5 flex items-center justify-between border-t border-line pt-4">
                 <span class="text-xs text-slate-500"><?= number_format((int) $app['project_count']) ?> proyecto(s)</span>
-                <?php if (!$app['is_default']): ?>
+                <?php if ($app['is_default']): ?>
+                    <button type="button" class="btn-secondary" data-dialog-open="#replace-default-dialog">Reemplazar</button>
+                <?php else: ?>
                     <form method="post" action="/system-apps/<?= e(rawurlencode($app['slug'])) ?>/delete" data-confirm="¿Eliminar esta carpeta y todos sus archivos?">
                         <input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>">
                         <button class="btn-danger" type="submit" <?= $app['project_count'] ? 'disabled title="Esta carpeta esta en uso"' : '' ?>>Eliminar</button>
@@ -57,5 +59,24 @@
             Compile Vue, React u otra interfaz usando rutas relativas (<code>base: './'</code>) para que imagenes, CSS y JavaScript carguen desde su propia carpeta.
         </div>
         <button class="btn-primary mt-6 w-full" type="submit">Subir y crear carpeta</button>
+    </form>
+</dialog>
+
+<dialog id="replace-default-dialog" class="w-full max-w-lg rounded-2xl border border-line bg-panel p-0 text-slate-200">
+    <form method="post" enctype="multipart/form-data" action="/system-apps/default/replace" class="p-6" data-confirm="Esto borra TODO el contenido actual de la interfaz por defecto y lo reemplaza con el ZIP subido. ¿Continuar?">
+        <input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>">
+        <div class="mb-6 flex items-start justify-between gap-4">
+            <div><h3 class="text-lg font-semibold text-white">Reemplazar interfaz por defecto</h3><p class="mt-1 text-sm text-slate-500">Borra todo lo que hay en <code>public/sistema/app</code> y sube el contenido del ZIP en su lugar.</p></div>
+            <button type="button" data-dialog-close class="text-slate-500">Cerrar</button>
+        </div>
+        <div class="rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-200">
+            Esto elimina por completo la version actual antes de publicar la nueva. Si el ZIP no tiene un <code>index.html</code> valido, se restaura automaticamente la version anterior.
+        </div>
+        <label class="mt-4 block">
+            <span class="label">Build compilado (.zip)</span>
+            <input class="input" type="file" name="file" accept=".zip,application/zip" required>
+            <span class="mt-2 block text-xs text-slate-500">Comprime el contenido de <code>dist/</code> (los archivos, no la carpeta) en un ZIP. Maximo <?= e((string) $maxUploadMb) ?> MB.</span>
+        </label>
+        <button class="btn-danger mt-6 w-full" type="submit">Borrar y reemplazar</button>
     </form>
 </dialog>
