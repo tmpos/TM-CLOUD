@@ -345,6 +345,7 @@ final class ApiController
                     'project_uid' => $p['uid'],
                     'project_name' => $p['name'],
                     'tables' => count($this->schema->tables($p)),
+                    'realtime_ws_url' => !empty($this->config['realtime']['enabled']) ? ($this->config['realtime']['ws_url'] ?? null) : null,
                 ],
             ]);
         }));
