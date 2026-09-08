@@ -9,7 +9,7 @@ RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 # ruta exacta y Apache intenta servir la carpeta en vez de pasarla a PHP. Se
 # fuerza a index.php solo para esta ruta exacta; el contenido subido bajo
 # /system-apps/<carpeta>/... sigue sirviendose como archivo estatico normal.
-RewriteRule ^system-apps$ index.php [QSA,L]
+RewriteRule ^system-apps/?$ index.php [QSA,L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [QSA,L]
