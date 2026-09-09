@@ -259,10 +259,23 @@ final class SystemRuntimeService
                 $tableName = (string) ($item['tabla'] ?? '');
                 if (!in_array($tableName, ['imei', 'serial', 'accesorios'], true)) throw new InvalidArgumentException('Producto de inventario no valido.');
                 $table = Support::quoteIdentifier($tableName);
-                if ($tableName === 'accesorios') $db->prepare("UPDATE $table SET cantidad=cantidad-?, updated_at=? WHERE id=? AND cantidad>=?")->execute([(float) ($item['cantidad'] ?? 0), gmdate('Y-m-d H:i:s'), (int) $item['id'], (float) ($item['cantidad'] ?? 0)]);
-                else $this->updateRaw($db, $project, $tableName, (int) $item['id'], (array) ($item['cambios'] ?? []));
+                if ($tableName === 'accesorios') {
+                    // UPDATE directo (no updateRaw) porque la condicion cantidad>=?
+                    // evita vender mas de lo disponible en una sola sentencia
+                    // atomica; el aviso de realtime se dispara aparte, solo si de
+                    // verdad descontó algo (rowCount>0), igual que hace updateRaw.
+                    $stmt = $db->prepare("UPDATE $table SET cantidad=cantidad-?, updated_at=? WHERE id=? AND cantidad>=?");
+                    $stmt->execute([(float) ($item['cantidad'] ?? 0), gmdate('Y-m-d H:i:s'), (int) $item['id'], (float) ($item['cantidad'] ?? 0)]);
+                    if ($stmt->rowCount() > 0) $this->webhooks->dispatch('record.updated', $project, $tableName, $this->row($db, $table, (int) $item['id']));
+                } else {
+                    $this->updateRaw($db, $project, $tableName, (int) $item['id'], (array) ($item['cambios'] ?? []));
+                }
             }
-            foreach ((array) ($payload['bancos'] ?? []) as $mov) if ((int) ($mov['id'] ?? 0) > 0 && (float) ($mov['monto'] ?? 0) > 0) $db->prepare('UPDATE bancos SET saldo=saldo+?, fecha_transaccion=?, updated_at=? WHERE id=?')->execute([(float) $mov['monto'], gmdate('Y-m-d H:i:s'), gmdate('Y-m-d H:i:s'), (int) $mov['id']]);
+            foreach ((array) ($payload['bancos'] ?? []) as $mov) {
+                if ((int) ($mov['id'] ?? 0) <= 0 || (float) ($mov['monto'] ?? 0) <= 0) continue;
+                $db->prepare('UPDATE bancos SET saldo=saldo+?, fecha_transaccion=?, updated_at=? WHERE id=?')->execute([(float) $mov['monto'], gmdate('Y-m-d H:i:s'), gmdate('Y-m-d H:i:s'), (int) $mov['id']]);
+                $this->webhooks->dispatch('record.updated', $project, 'bancos', $this->row($db, 'bancos', (int) $mov['id']));
+            }
             $db->commit();
             return ['success' => true, 'data' => ['id' => $facturaId]];
         } catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
@@ -360,12 +373,12 @@ final class SystemRuntimeService
     {
         $tableName=(string)($p['tabla']??''); if(!in_array($tableName,['imei','serial','accesorios','electrodomesticos','piezas'],true)) throw new InvalidArgumentException('Tabla no permitida.');
         $table=$this->table($db,$tableName); $db->beginTransaction();
-        try { foreach((array)($p['items']??[]) as $item){ $id=(int)($item['id']??0); if($tableName==='accesorios' && (float)($item['cantidad']??1)>0){ $stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$qty=(float)$item['cantidad'];if((float)$row['cantidad']<$qty)throw new RuntimeException('Cantidad insuficiente.');$db->prepare("UPDATE $table SET cantidad=cantidad-?,updated_at=? WHERE id=?")->execute([$qty,gmdate('Y-m-d H:i:s'),$id]);$copy=$row;unset($copy['id']);$copy['cantidad']=$qty;$copy['almacen_id']=(int)($p['destino_id']??0);$copy['almacen_uid']=(string)($p['destino_uid']??'');$copy['uid']=Support::uid('rec_');$this->insertRaw($db,$project,$tableName,$copy);}else{$db->prepare("UPDATE $table SET almacen_id=?,almacen_uid=?,updated_at=? WHERE id=?")->execute([(int)($p['destino_id']??0),(string)($p['destino_uid']??''),gmdate('Y-m-d H:i:s'),$id]);}} if(!empty($p['transferencia']))$this->insertRaw($db,$project,'transferencias',(array)$p['transferencia']);$db->commit();return['success'=>true];}catch(\Throwable $e){if($db->inTransaction())$db->rollBack();throw$e;}
+        try { foreach((array)($p['items']??[]) as $item){ $id=(int)($item['id']??0); if($tableName==='accesorios' && (float)($item['cantidad']??1)>0){ $stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$qty=(float)$item['cantidad'];if((float)$row['cantidad']<$qty)throw new RuntimeException('Cantidad insuficiente.');$db->prepare("UPDATE $table SET cantidad=cantidad-?,updated_at=? WHERE id=?")->execute([$qty,gmdate('Y-m-d H:i:s'),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$table,$id));$copy=$row;unset($copy['id']);$copy['cantidad']=$qty;$copy['almacen_id']=(int)($p['destino_id']??0);$copy['almacen_uid']=(string)($p['destino_uid']??'');$copy['uid']=Support::uid('rec_');$this->insertRaw($db,$project,$tableName,$copy);}else{$db->prepare("UPDATE $table SET almacen_id=?,almacen_uid=?,updated_at=? WHERE id=?")->execute([(int)($p['destino_id']??0),(string)($p['destino_uid']??''),gmdate('Y-m-d H:i:s'),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$table,$id));}} if(!empty($p['transferencia']))$this->insertRaw($db,$project,'transferencias',(array)$p['transferencia']);$db->commit();return['success'=>true];}catch(\Throwable $e){if($db->inTransaction())$db->rollBack();throw$e;}
     }
 
     private function ajustar(PDO $db, array $project, array $p): array
     {
-        $tableName=(string)($p['tabla']??'');$table=$this->table($db,$tableName);$id=(int)($p['producto_id']??0);$stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$before=(float)($row['cantidad']??0);$after=(float)($p['cantidad_nueva']??0);$db->prepare("UPDATE $table SET cantidad=?,updated_at=? WHERE id=?")->execute([$after,gmdate('Y-m-d H:i:s'),$id]);$this->insertRaw($db,$project,'ajustes_inventario',['tabla'=>$tableName,'producto_id'=>$id,'producto_nombre'=>$row['nombre']??'','cantidad_anterior'=>$before,'cantidad_nueva'=>$after,'diferencia'=>$after-$before,'tipo'=>$p['tipo']??'','motivo'=>$p['motivo']??'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true,'data'=>['anterior'=>$before,'nueva'=>$after,'diferencia'=>$after-$before]];
+        $tableName=(string)($p['tabla']??'');$table=$this->table($db,$tableName);$id=(int)($p['producto_id']??0);$stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$before=(float)($row['cantidad']??0);$after=(float)($p['cantidad_nueva']??0);$db->prepare("UPDATE $table SET cantidad=?,updated_at=? WHERE id=?")->execute([$after,gmdate('Y-m-d H:i:s'),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$table,$id));$this->insertRaw($db,$project,'ajustes_inventario',['tabla'=>$tableName,'producto_id'=>$id,'producto_nombre'=>$row['nombre']??'','cantidad_anterior'=>$before,'cantidad_nueva'=>$after,'diferencia'=>$after-$before,'tipo'=>$p['tipo']??'','motivo'=>$p['motivo']??'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true,'data'=>['anterior'=>$before,'nueva'=>$after,'diferencia'=>$after-$before]];
     }
 
     private function consultaServidor(PDO $db, array $project, array $args): mixed
