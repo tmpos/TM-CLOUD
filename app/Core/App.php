@@ -74,7 +74,7 @@ final class App
         $storefrontInventory = new StorefrontInventoryService($projects, $schema, $logs);
         $storefrontAdmins = new StorefrontAdminService($db, $storefronts, $storefrontInventory, $logs);
         $portalAuth = new PortalAuth($db);
-        $systemRuntime = new SystemRuntimeService($schema, $logs, $sharedDocuments);
+        $systemRuntime = new SystemRuntimeService($schema, $logs, $sharedDocuments, $webhooks);
         $projectSql = new ProjectSqlApiService($schema, $logs);
         $metrics = new MetricsService($db);
         $migrations = new MigrationService($db, $config['storage']);

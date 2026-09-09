@@ -16,7 +16,7 @@ use RuntimeException;
  */
 final class SystemRuntimeService
 {
-    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments)
+    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks)
     {
     }
 
@@ -114,6 +114,7 @@ final class SystemRuntimeService
         $id = (int) $db->lastInsertId();
         $this->audit($db, $tableName, $id, 'CREATE', $actor, $data, null);
         $this->logs->write('system.record.created', $project['uid'], $tableName, (string) ($data['uid'] ?? $id), null, ['actor' => $actor['email'] ?? '', 'id' => $id]);
+        $this->webhooks->dispatch('record.created', $project, $tableName, $this->row($db, $table, $id));
         return ['success' => true, 'data' => ['id' => $id, 'uid' => $data['uid'] ?? null]];
     }
 
@@ -132,6 +133,7 @@ final class SystemRuntimeService
         $db->prepare("UPDATE $table SET $sets WHERE id = ?")->execute([...array_values($data), $id]);
         $this->audit($db, $tableName, $id, 'UPDATE', $actor, $data, $old);
         $this->logs->write('system.record.updated', $project['uid'], $tableName, (string) ($old['uid'] ?? $id), $old, ['actor' => $actor['email'] ?? '', 'changes' => $data]);
+        $this->webhooks->dispatch('record.updated', $project, $tableName, $this->row($db, $table, $id));
         return ['success' => true, 'data' => ['id' => $id]];
     }
 
@@ -145,6 +147,7 @@ final class SystemRuntimeService
         $db->prepare("DELETE FROM $table WHERE id = ?")->execute([$id]);
         $this->audit($db, $tableName, $id, 'DELETE', $actor, null, $old);
         $this->logs->write('system.record.deleted', $project['uid'], $tableName, (string) ($old['uid'] ?? $id), $old, ['actor' => $actor['email'] ?? '']);
+        $this->webhooks->dispatch('record.deleted', $project, $tableName, $old);
         return ['success' => true];
     }
 
