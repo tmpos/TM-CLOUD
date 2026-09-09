@@ -99,6 +99,16 @@ CREATE TABLE IF NOT EXISTS backups (
     status TEXT NOT NULL DEFAULT 'valid',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS _support_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT UNIQUE NOT NULL,
+    project_uid TEXT NOT NULL,
+    admin_user_uid TEXT,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_support_tokens_lookup ON _support_tokens(uid, project_uid, used_at, expires_at);
 CREATE TABLE IF NOT EXISTS webhooks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     uid TEXT UNIQUE NOT NULL,

@@ -15,6 +15,7 @@
 <?php foreach (['tables'=>'Tables','database'=>'MySQL Sync','sql'=>'SQL Editor','settings'=>'Configuracion','backups'=>'Backups','storage'=>'Storage','webhooks'=>'Webhooks','licenses'=>'Licenses','logs'=>'Logs','diagram'=>'Diagram','functions'=>'Functions','migrations'=>'Migrations','metrics'=>'Metrics'] as $key=>$label): ?>
     <a class="tab <?= $tab === $key ? 'active' : '' ?>" href="?tab=<?= e($key) ?>"><?= e($label) ?></a>
 <?php endforeach; ?>
+    <a class="tab" href="/projects/<?= e($project['uid']) ?>/support">Soporte</a>
 </nav>
 
 <?php if ($tab === 'tables'): ?>

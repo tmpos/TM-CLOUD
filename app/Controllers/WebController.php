@@ -27,6 +27,7 @@ use App\Services\PdfService;
 use App\Services\MailService;
 use App\Services\WebhookService;
 use App\Services\DatabaseBridgeService;
+use App\Services\SupportService;
 use Flight;
 use PDO;
 
@@ -55,6 +56,7 @@ final class WebController
         private ApkFileService $apkFiles,
         private SystemAppService $systemApps,
         private RealtimeService $realtime,
+        private SupportService $support,
     ) {
     }
 
@@ -448,6 +450,12 @@ final class WebController
             Flight::redirect("/projects/$uid?tab=backups");
         }));
         Flight::route('GET /projects/@uid/backups/@backup/download', fn (string $uid, string $backup) => $this->page(fn () => $this->downloadBackup($uid, $backup)));
+        Flight::route('GET /projects/@uid/support', fn (string $uid) => $this->page(fn () => $this->supportPage($uid)));
+        Flight::route('POST /projects/@uid/support/token', fn (string $uid) => $this->action(function () use ($uid): void {
+            $this->projects->findActive($uid);
+            $issued = $this->support->issueToken($uid, (string) (Auth::user()['uid'] ?? ''));
+            Flight::json(['data' => $issued]);
+        }));
         Flight::route('POST /projects/@uid/backups/@backup/restore', fn (string $uid, string $backup) => $this->action(function () use ($uid, $backup): void {
             $this->backups->restore($this->projects->find($uid), $backup);
             Http::flash('success', 'Backup restored. A safety backup was created first.');
@@ -661,6 +669,17 @@ final class WebController
             'usage' => $usage,
             'global' => $global,
             'quotaBytes' => (int) $this->config['project_storage_max_bytes'],
+            'flashes' => Http::flashes(),
+        ]);
+    }
+
+    private function supportPage(string $uid): void
+    {
+        $project = $this->projects->find($uid);
+        View::render('support', [
+            'title' => 'Soporte remoto',
+            'project' => $project,
+            'wsUrl' => !empty($this->config['realtime']['enabled']) ? ($this->config['realtime']['ws_url'] ?? null) : null,
             'flashes' => Http::flashes(),
         ]);
     }

@@ -22,6 +22,7 @@ use App\Services\RecordService;
 use App\Services\S3ClientService;
 use App\Services\SchemaService;
 use App\Services\StorageService;
+use App\Services\SupportService;
 use App\Services\ApkFileService;
 use App\Services\RealtimeService;
 use App\Services\WebhookService;
@@ -82,8 +83,9 @@ final class App
         $metrics = new MetricsService($db);
         $migrations = new MigrationService($db, $config['storage']);
         $alerts = new AlertService($db, $config, $projects, $metrics, $backups, $mail, $logs);
+        $support = new SupportService($db, $config);
 
-        (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge, $pdf, $functions, $metrics, $migrations, $mail, $apkFiles, $systemApps, $realtime))->register();
+        (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge, $pdf, $functions, $metrics, $migrations, $mail, $apkFiles, $systemApps, $realtime, $support))->register();
         (new PortalController($config, $portalAuth, $projects, $schema, $records, $pdf, $sharedDocuments, $keys))->register();
         (new SystemController($portalAuth, $projects, $systemRuntime, $keys, $systemApps, $projectSql, $storage))->register();
         (new StorefrontController($config, $storefronts, $projects, $records, $pdf, $keys, $storefrontCommerce, $mail))->register();

@@ -19,6 +19,10 @@ final class RealtimeServer implements MessageComponentInterface
     private \SplObjectStorage $clients;
     private array $projects = [];
     private array $connectionProject = [];
+    /** connId => ['client_id'=>, 'role'=>'station'|'admin', 'device_id'=>?, 'device_name'=>?, 'project'=>] */
+    private array $connectionMeta = [];
+    /** projectUid => deviceId => connId, so an admin can address a specific station. */
+    private array $projectDevices = [];
     private ?PDO $db = null;
     private string $dbPath;
 
@@ -52,6 +56,7 @@ final class RealtimeServer implements MessageComponentInterface
         match ($data['type']) {
             'subscribe' => $this->subscribe($from, $data),
             'unsubscribe' => $this->unsubscribe($from, $data),
+            'signal' => $this->relaySignal($from, $data),
             'ping' => $from->send(json_encode(['type' => 'pong'])),
             default => null,
         };
@@ -61,6 +66,15 @@ final class RealtimeServer implements MessageComponentInterface
     {
         $this->clients->detach($conn);
         $connId = spl_object_id($conn);
+        $meta = $this->connectionMeta[$connId] ?? null;
+
+        if ($meta && $meta['role'] === 'station' && $meta['device_id'] !== null) {
+            $projectUid = $meta['project'];
+            if (($this->projectDevices[$projectUid][$meta['device_id']] ?? null) === $connId) {
+                unset($this->projectDevices[$projectUid][$meta['device_id']]);
+            }
+            $this->broadcastPresence($projectUid, 'offline', $meta['device_id'], $meta['device_name']);
+        }
 
         if (isset($this->connectionProject[$connId])) {
             $project = $this->connectionProject[$connId];
@@ -70,6 +84,7 @@ final class RealtimeServer implements MessageComponentInterface
             }
             unset($this->connectionProject[$connId]);
         }
+        unset($this->connectionMeta[$connId]);
     }
 
     public function onError(ConnectionInterface $conn, \Exception $e): void
@@ -81,6 +96,8 @@ final class RealtimeServer implements MessageComponentInterface
     {
         $projectUid = (string) ($data['project'] ?? '');
         $token = (string) ($data['token'] ?? '');
+        $role = (string) ($data['role'] ?? 'station');
+        if (!in_array($role, ['station', 'admin'], true)) $role = 'station';
 
         if ($projectUid === '' || $token === '') {
             $conn->send(json_encode(['type' => 'error', 'message' => 'Project UID and token are required.']));
@@ -97,10 +114,17 @@ final class RealtimeServer implements MessageComponentInterface
                 return;
             }
 
-            $authorized = hash_equals($project['public_key'], $token) || hash_equals($project['secret_key'], $token);
-            if (!$authorized) {
-                $conn->send(json_encode(['type' => 'error', 'message' => 'Invalid token.']));
-                return;
+            if ($role === 'admin') {
+                if (!$this->consumeSupportToken($projectUid, $token)) {
+                    $conn->send(json_encode(['type' => 'error', 'message' => 'Invalid or expired support token.']));
+                    return;
+                }
+            } else {
+                $authorized = hash_equals($project['public_key'], $token) || hash_equals($project['secret_key'], $token);
+                if (!$authorized) {
+                    $conn->send(json_encode(['type' => 'error', 'message' => 'Invalid token.']));
+                    return;
+                }
             }
         } catch (\Throwable $e) {
             $conn->send(json_encode(['type' => 'error', 'message' => 'Authentication failed.']));
@@ -111,7 +135,115 @@ final class RealtimeServer implements MessageComponentInterface
         $this->projects[$projectUid][$connId] = $conn;
         $this->connectionProject[$connId] = $projectUid;
 
-        $conn->send(json_encode(['type' => 'subscribed', 'project' => $projectUid]));
+        $clientId = bin2hex(random_bytes(12));
+        $deviceId = $role === 'station' ? trim((string) ($data['device_id'] ?? '')) : null;
+        $deviceId = ($deviceId === '' ? null : $deviceId);
+        $deviceName = $role === 'station' ? trim((string) ($data['device_name'] ?? '')) : null;
+        $deviceName = ($deviceName === '' ? null : $deviceName);
+
+        $this->connectionMeta[$connId] = [
+            'client_id' => $clientId, 'role' => $role, 'project' => $projectUid,
+            'device_id' => $deviceId, 'device_name' => $deviceName,
+        ];
+
+        if ($role === 'station' && $deviceId !== null) {
+            $this->projectDevices[$projectUid][$deviceId] = $connId;
+            $this->broadcastPresence($projectUid, 'online', $deviceId, $deviceName);
+        }
+
+        $conn->send(json_encode(['type' => 'subscribed', 'project' => $projectUid, 'client_id' => $clientId, 'role' => $role]));
+
+        if ($role === 'admin') {
+            $conn->send(json_encode(['type' => 'presence_snapshot', 'stations' => $this->stationsSnapshot($projectUid)]));
+        }
+    }
+
+    private function stationsSnapshot(string $projectUid): array
+    {
+        $stations = [];
+        foreach ($this->projectDevices[$projectUid] ?? [] as $deviceId => $connId) {
+            $meta = $this->connectionMeta[$connId] ?? null;
+            if ($meta) $stations[] = ['device_id' => $deviceId, 'device_name' => $meta['device_name']];
+        }
+        return $stations;
+    }
+
+    private function broadcastPresence(string $projectUid, string $action, string $deviceId, ?string $deviceName): void
+    {
+        if (!isset($this->projects[$projectUid])) return;
+        $payload = json_encode(['type' => 'presence', 'action' => $action, 'device_id' => $deviceId, 'device_name' => $deviceName]);
+        foreach ($this->projects[$projectUid] as $connId => $conn) {
+            $meta = $this->connectionMeta[$connId] ?? null;
+            if ($meta && $meta['role'] === 'admin') $conn->send($payload);
+        }
+    }
+
+    /** Signaling is a dumb relay: the server only checks that sender/target share a project and that
+     * an admin<->station pairing is respected, never inspects the WebRTC payload itself. */
+    private function relaySignal(ConnectionInterface $from, array $data): void
+    {
+        $connId = spl_object_id($from);
+        $meta = $this->connectionMeta[$connId] ?? null;
+        if (!$meta) return;
+
+        $projectUid = $meta['project'];
+        $sessionId = (string) ($data['session_id'] ?? '');
+        $payload = $data['payload'] ?? null;
+        if ($sessionId === '' || $payload === null) return;
+
+        $targetConn = null;
+        if ($meta['role'] === 'admin') {
+            $toDeviceId = (string) ($data['to_device_id'] ?? '');
+            $targetConnId = $this->projectDevices[$projectUid][$toDeviceId] ?? null;
+            if ($targetConnId !== null) $targetConn = $this->projects[$projectUid][$targetConnId] ?? null;
+        } else {
+            $toClientId = (string) ($data['to_client_id'] ?? '');
+            foreach ($this->projects[$projectUid] ?? [] as $cid => $conn) {
+                $candidateMeta = $this->connectionMeta[$cid] ?? null;
+                if ($candidateMeta && $candidateMeta['role'] === 'admin' && $candidateMeta['client_id'] === $toClientId) {
+                    $targetConn = $conn;
+                    break;
+                }
+            }
+        }
+        if (!$targetConn) return;
+
+        $targetConn->send(json_encode([
+            'type' => 'signal',
+            'session_id' => $sessionId,
+            'from_client_id' => $meta['client_id'],
+            'from_device_id' => $meta['device_id'],
+            'from_device_name' => $meta['device_name'],
+            'payload' => $payload,
+        ]));
+
+        $this->logSupportEvent($projectUid, $sessionId, is_array($payload) ? (string) ($payload['kind'] ?? '') : '', $meta);
+    }
+
+    private function logSupportEvent(string $projectUid, string $sessionId, string $kind, array $fromMeta): void
+    {
+        if (!in_array($kind, ['request', 'accept', 'deny', 'end'], true)) return;
+        try {
+            $this->db()->prepare(
+                'INSERT INTO project_logs (uid, project_uid, action, table_name, record_uid, created_at) VALUES (?,?,?,?,?,?)'
+            )->execute([
+                bin2hex(random_bytes(12)), $projectUid, 'support.' . $kind, $fromMeta['device_id'] ?? null, $sessionId, gmdate('Y-m-d H:i:s'),
+            ]);
+        } catch (\Throwable) {
+        }
+    }
+
+    private function consumeSupportToken(string $projectUid, string $token): bool
+    {
+        $now = gmdate('Y-m-d H:i:s');
+        $stmt = $this->db()->prepare(
+            'SELECT id FROM _support_tokens WHERE uid = ? AND project_uid = ? AND used_at IS NULL AND expires_at > ? LIMIT 1'
+        );
+        $stmt->execute([$token, $projectUid, $now]);
+        $row = $stmt->fetch();
+        if (!$row) return false;
+        $this->db()->prepare('UPDATE _support_tokens SET used_at = ? WHERE id = ?')->execute([$now, $row['id']]);
+        return true;
     }
 
     private function unsubscribe(ConnectionInterface $conn, array $data): void
