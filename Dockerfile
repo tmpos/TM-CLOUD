@@ -31,7 +31,10 @@ COPY composer.json composer.lock* ./
 RUN composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
 
 COPY . .
-RUN composer dump-autoload --optimize \
+RUN mkdir -p /var/www/html/.seed \
+    && cp -a /var/www/html/public/sistema/app /var/www/html/.seed/sistema-app \
+    && cp -a /var/www/html/public/system-apps /var/www/html/.seed/system-apps \
+    && composer dump-autoload --optimize \
     && chmod +x /var/www/html/bin/realtime-server /var/www/html/bin/mail-worker \
     && chmod +x /var/www/html/docker-entrypoint.sh \
     && chown -R www-data:www-data /var/www/html \

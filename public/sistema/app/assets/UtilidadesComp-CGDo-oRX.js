@@ -1,0 +1,1 @@
+import{N as e,c as t,d as n}from"./runtime-core.esm-bundler-a6pTXghO.js";import{h as r}from"./index-BMrcxrjI.js";var i={};function a(r,i){return e(),n(`div`,null,[...i[0]||=[t(`h3`,{class:`text-xl font-bold mb-2`},`Utilidades`,-1),t(`p`,{class:`text-surface-500 dark:text-surface-400`},`Control de utilidades y beneficios.`,-1)]])}var o=r(i,[[`render`,a]]);export{o as default};

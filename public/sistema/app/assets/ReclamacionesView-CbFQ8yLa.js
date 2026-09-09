@@ -1,0 +1,1 @@
+import{N as e,l as t,v as n}from"./runtime-core.esm-bundler-a6pTXghO.js";import{t as r}from"./ReclamacionesComp-BkCT0Bmq.js";var i=n({__name:`ReclamacionesView`,setup(n){return(n,i)=>(e(),t(r))}});export{i as default};
