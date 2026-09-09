@@ -38,6 +38,7 @@ $flashes = $flashes ?? [];
             <a href="/api-docs" class="nav-link">API Docs</a>
             <a href="/backups" class="nav-link">Backups</a>
             <a href="/storage" class="nav-link">Storage</a>
+            <a href="/space-usage" class="nav-link">Uso de espacio</a>
             <a href="/apk-files" class="nav-link">Archivos APK</a>
             <a href="/mail-settings" class="nav-link">Correo OTP</a>
             <a href="/licenses" class="nav-link">Licenses</a>

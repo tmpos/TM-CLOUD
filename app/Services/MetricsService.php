@@ -102,6 +102,35 @@ final class MetricsService
         return $size;
     }
 
+    public function perProjectUsage(array $projects, string $storage, int $quotaBytes = 0): array
+    {
+        $rows = [];
+        $totals = ['database' => 0, 'uploads' => 0, 'backups' => 0, 'total' => 0];
+        foreach ($projects as $project) {
+            $uid = (string) $project['uid'];
+            $database = $this->dirSize($storage . '/projects/' . $uid);
+            $uploads = $this->dirSize($storage . '/uploads/' . $uid);
+            $backups = $this->dirSize($storage . '/backups/' . $uid);
+            $total = $database + $uploads + $backups;
+            $rows[] = [
+                'uid' => $uid,
+                'name' => (string) $project['name'],
+                'database' => $database,
+                'uploads' => $uploads,
+                'backups' => $backups,
+                'total' => $total,
+                'quota' => $quotaBytes,
+                'percent' => $quotaBytes > 0 ? min(100, round($total / $quotaBytes * 100, 1)) : null,
+            ];
+            $totals['database'] += $database;
+            $totals['uploads'] += $uploads;
+            $totals['backups'] += $backups;
+            $totals['total'] += $total;
+        }
+        usort($rows, fn ($a, $b) => $b['total'] <=> $a['total']);
+        return ['projects' => $rows, 'totals' => $totals];
+    }
+
     public function globalSummary(): array
     {
         $projects = (int) $this->db->query('SELECT COUNT(*) FROM projects')->fetchColumn();

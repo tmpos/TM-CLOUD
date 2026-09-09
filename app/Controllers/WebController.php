@@ -80,6 +80,7 @@ final class WebController
         Flight::route('GET /api-docs', fn () => $this->page(fn () => $this->apiDocs()));
         Flight::route('GET /backups', fn () => $this->page(fn () => $this->backupsPage()));
         Flight::route('GET /storage', fn () => $this->page(fn () => $this->storagePage()));
+        Flight::route('GET /space-usage', fn () => $this->page(fn () => $this->spaceUsagePage()));
         Flight::route('GET /apk-files', fn () => $this->page(fn () => $this->apkFilesPage()));
         Flight::route('GET /apk-files/upload', fn () => $this->page(fn () => $this->apkUploadPage()));
         Flight::route('POST /apk-files/upload', fn () => $this->action(function (): void {
@@ -620,6 +621,20 @@ final class WebController
         $files = $this->storage->allGlobal($projects);
         View::render('storage', [
             'title' => 'All Storage', 'files' => $files,
+            'flashes' => Http::flashes(),
+        ]);
+    }
+
+    private function spaceUsagePage(): void
+    {
+        $projects = $this->projects->all();
+        $usage = $this->metrics->perProjectUsage($projects, $this->config['storage'], (int) $this->config['project_storage_max_bytes']);
+        $global = $this->metrics->storageUsage($this->config['storage']);
+        View::render('space-usage', [
+            'title' => 'Uso de espacio',
+            'usage' => $usage,
+            'global' => $global,
+            'quotaBytes' => (int) $this->config['project_storage_max_bytes'],
             'flashes' => Http::flashes(),
         ]);
     }
