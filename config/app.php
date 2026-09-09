@@ -22,6 +22,10 @@ return [
     'backup_retention_count' => max(1, (int) (getenv('BACKUP_RETENTION_COUNT') ?: 20)),
     'backup_retention_days' => max(1, (int) (getenv('BACKUP_RETENTION_DAYS') ?: 90)),
     'backup_max_bytes_per_project' => ((int) (getenv('BACKUP_MAX_MB_PER_PROJECT') ?: 5120)) * 1024 * 1024,
+    'alert_admin_email' => getenv('ALERT_ADMIN_EMAIL') ?: '',
+    'alert_storage_threshold_percent' => (int) (getenv('ALERT_STORAGE_THRESHOLD_PERCENT') ?: 90),
+    'alert_backup_stale_days' => (int) (getenv('ALERT_BACKUP_STALE_DAYS') ?: 2),
+    'alert_cooldown_hours' => (int) (getenv('ALERT_COOLDOWN_HOURS') ?: 24),
     'mail' => [
         'enabled' => filter_var(getenv('MAIL_ENABLED') ?: false, FILTER_VALIDATE_BOOL),
         'host' => getenv('MAIL_HOST') ?: '',
@@ -33,6 +37,7 @@ return [
         'from_name' => getenv('MAIL_FROM_NAME') ?: (getenv('APP_NAME') ?: 'TMPBase'),
         'reply_to' => getenv('MAIL_REPLY_TO') ?: '',
         'max_attempts' => max(1, (int) (getenv('MAIL_MAX_ATTEMPTS') ?: 5)),
+        'admin_email' => getenv('ALERT_ADMIN_EMAIL') ?: '',
     ],
     'realtime' => [
         'enabled' => filter_var(getenv('REALTIME_ENABLED') ?: true, FILTER_VALIDATE_BOOL),

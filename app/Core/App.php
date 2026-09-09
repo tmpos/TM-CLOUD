@@ -10,6 +10,7 @@ use App\Controllers\PortalController;
 use App\Controllers\StorefrontController;
 use App\Controllers\StorefrontAdminController;
 use App\Controllers\SystemController;
+use App\Services\AlertService;
 use App\Services\ApiKeyService;
 use App\Services\BackupService;
 use App\Services\ImportExportService;
@@ -78,6 +79,7 @@ final class App
         $projectSql = new ProjectSqlApiService($schema, $logs);
         $metrics = new MetricsService($db);
         $migrations = new MigrationService($db, $config['storage']);
+        $alerts = new AlertService($db, $config, $projects, $metrics, $backups, $mail, $logs);
 
         (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge, $pdf, $functions, $metrics, $migrations, $mail, $apkFiles, $systemApps, $realtime))->register();
         (new PortalController($config, $portalAuth, $projects, $schema, $records, $pdf, $sharedDocuments, $keys))->register();
