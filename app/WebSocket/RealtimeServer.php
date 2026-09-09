@@ -52,6 +52,7 @@ final class RealtimeServer implements MessageComponentInterface
         match ($data['type']) {
             'subscribe' => $this->subscribe($from, $data),
             'unsubscribe' => $this->unsubscribe($from, $data),
+            'ping' => $from->send(json_encode(['type' => 'pong'])),
             default => null,
         };
     }
