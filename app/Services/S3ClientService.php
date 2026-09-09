@@ -20,6 +20,14 @@ final class S3ClientService
         $endpoint = (string) $this->config['endpoint'];
         $host = (string) parse_url($endpoint, PHP_URL_HOST);
         if ($host === '' || $host === null) throw new RuntimeException('Invalid MinIO endpoint.');
+        // The signed "host" header must match the Host header curl actually sends, which
+        // includes a non-default port (e.g. MinIO's :9000) — otherwise MinIO recomputes a
+        // different canonical request and rejects the signature.
+        $port = parse_url($endpoint, PHP_URL_PORT);
+        $scheme = (string) parse_url($endpoint, PHP_URL_SCHEME);
+        if ($port !== null && !(($scheme === 'https' && $port === 443) || ($scheme === 'http' && $port === 80))) {
+            $host .= ':' . $port;
+        }
         $body = file_get_contents($filePath);
         if ($body === false) throw new RuntimeException('Could not read the file to mirror.');
 
