@@ -158,23 +158,23 @@ final class SystemRuntimeService
         if ($channel === 'config:set') return $this->configSet($db, ['clave' => $args[0] ?? '', 'valor' => $args[1] ?? '', 'categoria' => $args[2] ?? 'general']);
         if ($channel === 'facturas:crearEnlacePdf') return $this->shareInvoice($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'db:exec') return $this->executeSql($db, (string) ($args[0] ?? ''), true);
-        if ($channel === 'consultaservidor') return $this->consultaServidor($db, $args);
+        if ($channel === 'consultaservidor') return $this->consultaServidor($db, $project, $args);
         if (in_array($channel, ['caja:getTurnoActivo', 'caja:getTurnoAbierto'], true)) return $this->turnoActivo($db, (string) ($args[0] ?? ''));
-        if ($channel === 'caja:abrirTurno') return $this->abrirTurno($db, (array) ($args[0] ?? []));
+        if ($channel === 'caja:abrirTurno') return $this->abrirTurno($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'caja:cerrarTurno') return $this->cerrarTurno($db, (int) ($args[0] ?? 0), (array) ($args[1] ?? []));
         if ($channel === 'caja:getMovimientos') return $this->movimientosCaja($db, (int) ($args[0] ?? 0));
-        if ($channel === 'caja:registrarMovimiento') return $this->registrarMovimientoCaja($db, (array) ($args[0] ?? []));
+        if ($channel === 'caja:registrarMovimiento') return $this->registrarMovimientoCaja($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'cuadre:listar') return $this->listarCuadres($db, (string) ($args[0] ?? ''));
         if ($channel === 'cuadre:ventasTurno') return $this->ventasTurno($db, (string) ($args[0] ?? ''));
         if ($channel === 'cuadre:gastosTurno') return $this->gastosTurno($db, (string) ($args[0] ?? ''));
-        if ($channel === 'cuadre:realizar') return $this->realizarCuadre($db, (array) ($args[0] ?? []));
-        if ($channel === 'gastos:guardarConPago') return $this->guardarGasto($db, (array) ($args[0] ?? []));
+        if ($channel === 'cuadre:realizar') return $this->realizarCuadre($db, $project, (array) ($args[0] ?? []));
+        if ($channel === 'gastos:guardarConPago') return $this->guardarGasto($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'gastos:eliminarConPago') return $this->eliminarGasto($db, (int) ($args[0] ?? 0));
-        if ($channel === 'ventas:guardarAtomica') return $this->guardarVenta($db, (array) ($args[0] ?? []));
-        if ($channel === 'ventas:cobrarPendiente') return $this->cobrarPendiente($db, (array) ($args[0] ?? []));
-        if ($channel === 'transferencia:realizar') return $this->transferir($db, (array) ($args[0] ?? []));
-        if ($channel === 'ajuste:realizar') return $this->ajustar($db, (array) ($args[0] ?? []));
-        if ($channel === 'precio:registrarHistorial') return $this->registrarPrecios($db, (array) ($args[0] ?? []));
+        if ($channel === 'ventas:guardarAtomica') return $this->guardarVenta($db, $project, (array) ($args[0] ?? []));
+        if ($channel === 'ventas:cobrarPendiente') return $this->cobrarPendiente($db, $project, (array) ($args[0] ?? []));
+        if ($channel === 'transferencia:realizar') return $this->transferir($db, $project, (array) ($args[0] ?? []));
+        if ($channel === 'ajuste:realizar') return $this->ajustar($db, $project, (array) ($args[0] ?? []));
+        if ($channel === 'precio:registrarHistorial') return $this->registrarPrecios($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'auditoria:registrar') { $payload = (array) ($args[0] ?? []); $this->audit($db, (string) ($payload['tabla'] ?? 'sistema'), (int) ($payload['registro_id'] ?? 0), (string) ($payload['accion'] ?? 'ACTION'), $actor, $payload['datos_nuevos'] ?? null, $payload['datos_anteriores'] ?? null); return ['success' => true]; }
         if ($channel === 'app:getName') return 'TMPOS Web';
         if ($channel === 'app:getVersion') return '2.13.3-web';
@@ -243,7 +243,7 @@ final class SystemRuntimeService
         return $user ? ['success' => true, 'data' => $user] : ['success' => false, 'error' => $mode === 'pin' ? 'PIN incorrecto' : 'Usuario o contrasena incorrectos'];
     }
 
-    private function guardarVenta(PDO $db, array $payload): array
+    private function guardarVenta(PDO $db, array $project, array $payload): array
     {
         $factura = (array) ($payload['factura'] ?? []);
         if (trim((string) ($factura['no_factura'] ?? '')) === '') throw new InvalidArgumentException('La venta no tiene numero de factura.');
@@ -252,15 +252,15 @@ final class SystemRuntimeService
             $exists = $db->prepare('SELECT 1 FROM facturas WHERE no_factura = ? LIMIT 1');
             $exists->execute([$factura['no_factura']]);
             if ($exists->fetchColumn()) throw new RuntimeException('La factura ya existe.');
-            $facturaId = $this->insertRaw($db, 'facturas', $factura);
-            if (!empty($payload['cuenta_cobrar'])) $this->insertRaw($db, 'cuentas_cobrar', (array) $payload['cuenta_cobrar']);
+            $facturaId = $this->insertRaw($db, $project, 'facturas', $factura);
+            if (!empty($payload['cuenta_cobrar'])) $this->insertRaw($db, $project, 'cuentas_cobrar', (array) $payload['cuenta_cobrar']);
             if (!empty($payload['comprobante_id'])) $db->prepare('UPDATE comprobantes_fiscales SET secuencia_actual=secuencia_actual+1, updated_at=? WHERE id=?')->execute([gmdate('Y-m-d H:i:s'), (int) $payload['comprobante_id']]);
             foreach ((array) ($payload['inventario'] ?? []) as $item) {
                 $tableName = (string) ($item['tabla'] ?? '');
                 if (!in_array($tableName, ['imei', 'serial', 'accesorios'], true)) throw new InvalidArgumentException('Producto de inventario no valido.');
                 $table = Support::quoteIdentifier($tableName);
                 if ($tableName === 'accesorios') $db->prepare("UPDATE $table SET cantidad=cantidad-?, updated_at=? WHERE id=? AND cantidad>=?")->execute([(float) ($item['cantidad'] ?? 0), gmdate('Y-m-d H:i:s'), (int) $item['id'], (float) ($item['cantidad'] ?? 0)]);
-                else $this->updateRaw($db, $tableName, (int) $item['id'], (array) ($item['cambios'] ?? []));
+                else $this->updateRaw($db, $project, $tableName, (int) $item['id'], (array) ($item['cambios'] ?? []));
             }
             foreach ((array) ($payload['bancos'] ?? []) as $mov) if ((int) ($mov['id'] ?? 0) > 0 && (float) ($mov['monto'] ?? 0) > 0) $db->prepare('UPDATE bancos SET saldo=saldo+?, fecha_transaccion=?, updated_at=? WHERE id=?')->execute([(float) $mov['monto'], gmdate('Y-m-d H:i:s'), gmdate('Y-m-d H:i:s'), (int) $mov['id']]);
             $db->commit();
@@ -268,7 +268,7 @@ final class SystemRuntimeService
         } catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
     }
 
-    private function cobrarPendiente(PDO $db, array $p): array
+    private function cobrarPendiente(PDO $db, array $project, array $p): array
     {
         $id = (int) ($p['factura_id'] ?? 0);
         $db->beginTransaction();
@@ -279,6 +279,7 @@ final class SystemRuntimeService
             if (abs(($efectivo+$tarjeta+$transferencia)-$total) >= .01) throw new InvalidArgumentException('La distribucion del pago no coincide con el total.');
             $db->prepare("UPDATE facturas SET estado_factura='PAGADA', metodo_pago=?, efectivo=?, tarjeta=?, transferencia=?, updated_at=? WHERE id=?")->execute([(string)($p['metodo_pago']??''),$efectivo,$tarjeta,$transferencia,gmdate('Y-m-d H:i:s'),$id]);
             if ((int)($p['banco_id']??0)>0 && $tarjeta+$transferencia>0) $db->prepare('UPDATE bancos SET saldo=saldo+?, updated_at=? WHERE id=?')->execute([$tarjeta+$transferencia,gmdate('Y-m-d H:i:s'),(int)$p['banco_id']]);
+            $this->webhooks->dispatch('record.updated', $project, 'facturas', $this->row($db, 'facturas', $id));
             $db->commit(); return ['success'=>true,'data'=>['id'=>$id]];
         } catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
     }
@@ -290,7 +291,7 @@ final class SystemRuntimeService
         return ['success'=>true,'data'=>$stmt->fetch()?:null];
     }
 
-    private function abrirTurno(PDO $db, array $data): array { return ['success'=>true,'data'=>['id'=>$this->insertRaw($db,'caja_turnos',$data+['entradas'=>0,'retiros'=>0,'estado'=>'abierto'])]]; }
+    private function abrirTurno(PDO $db, array $project, array $data): array { return ['success'=>true,'data'=>['id'=>$this->insertRaw($db,$project,'caja_turnos',$data+['entradas'=>0,'retiros'=>0,'estado'=>'abierto'])]]; }
     private function cerrarTurno(PDO $db, int $id, array $data): array { $db->prepare("UPDATE caja_turnos SET estado='cerrado',monto_final=?,efectivo_esperado=?,diferencia=?,cierre_ciego=?,updated_at=? WHERE id=? AND estado='abierto'")->execute([(float)($data['monto_final']??0),(float)($data['efectivo_esperado']??0),(float)($data['diferencia']??0),!empty($data['cierre_ciego'])?1:0,gmdate('Y-m-d H:i:s'),$id]); return ['success'=>true]; }
 
     private function movimientosCaja(PDO $db, int $turnoId): array
@@ -300,9 +301,9 @@ final class SystemRuntimeService
         return ['success' => true, 'data' => $stmt->fetchAll()];
     }
 
-    private function registrarMovimientoCaja(PDO $db, array $data): array
+    private function registrarMovimientoCaja(PDO $db, array $project, array $data): array
     {
-        $id = $this->insertRaw($db, 'caja_movimientos', $data);
+        $id = $this->insertRaw($db, $project, 'caja_movimientos', $data);
         $type = strtolower((string) ($data['tipo'] ?? 'entrada'));
         $column = in_array($type, ['retiro', 'salida'], true) ? 'retiros' : 'entradas';
         $db->prepare("UPDATE caja_turnos SET $column=COALESCE($column,0)+?,updated_at=? WHERE id=?")->execute([(float) ($data['monto'] ?? $data['cantidad'] ?? 0), gmdate('Y-m-d H:i:s'), (int) ($data['turno_id'] ?? 0)]);
@@ -332,17 +333,17 @@ final class SystemRuntimeService
         $where='created_at>=?';$params=[$turno['created_at']];if($warehouse!==''){$where.=" AND (almacen_uid=? OR COALESCE(almacen_uid,'')='')";$params[]=$warehouse;}$stmt=$db->prepare("SELECT COALESCE(SUM(cantidad),0) total,COUNT(*) cantidad FROM gastos WHERE $where");$stmt->execute($params);return['success'=>true,'data'=>$stmt->fetch()];
     }
 
-    private function realizarCuadre(PDO $db, array $data): array
+    private function realizarCuadre(PDO $db, array $project, array $data): array
     {
-        $db->beginTransaction();try{$id=$this->insertRaw($db,'cuadres',$data);if(!empty($data['turno_id']))$this->cerrarTurno($db,(int)$data['turno_id'],['monto_final'=>$data['monto_contado']??$data['monto_final']??0,'efectivo_esperado'=>$data['efectivo_esperado']??0,'diferencia'=>$data['diferencia']??0,'cierre_ciego'=>$data['cierre_ciego']??false]);$db->commit();return['success'=>true,'data'=>['id'=>$id]];}catch(\Throwable$e){if($db->inTransaction())$db->rollBack();throw$e;}
+        $db->beginTransaction();try{$id=$this->insertRaw($db,$project,'cuadres',$data);if(!empty($data['turno_id']))$this->cerrarTurno($db,(int)$data['turno_id'],['monto_final'=>$data['monto_contado']??$data['monto_final']??0,'efectivo_esperado'=>$data['efectivo_esperado']??0,'diferencia'=>$data['diferencia']??0,'cierre_ciego'=>$data['cierre_ciego']??false]);$db->commit();return['success'=>true,'data'=>['id'=>$id]];}catch(\Throwable$e){if($db->inTransaction())$db->rollBack();throw$e;}
     }
 
-    private function guardarGasto(PDO $db, array $p): array
+    private function guardarGasto(PDO $db, array $project, array $p): array
     {
         $id=(int)($p['id']??0);$amount=(float)($p['cantidad']??0);$method=strtoupper(trim((string)($p['metodo_pago']??'EFECTIVO')));if($amount<=0)throw new InvalidArgumentException('El monto del gasto debe ser mayor que cero.');if(!in_array($method,['EFECTIVO','TRANSFERENCIA'],true))throw new InvalidArgumentException('Metodo de pago no valido.');
         $db->beginTransaction();try{$old=null;if($id){$stmt=$db->prepare('SELECT * FROM gastos WHERE id=?');$stmt->execute([$id]);$old=$stmt->fetch()?:throw new RuntimeException('El gasto no existe.');if(strtoupper((string)($old['metodo_pago']??''))==='TRANSFERENCIA')$this->changeBank($db,(int)($old['banco_id']??0),(string)($old['banco_uid']??''),(float)($old['cantidad']??0));}
             $bank=null;if($method==='TRANSFERENCIA'){$bank=$this->bank($db,(int)($p['banco_id']??0),(string)($p['banco_uid']??''));if(!$bank)throw new RuntimeException('No se encontro el banco seleccionado.');if((float)$bank['saldo']<$amount)throw new RuntimeException('Fondos insuficientes en el banco.');$this->changeBank($db,(int)$bank['id'],(string)($bank['uid']??''),-$amount);}
-            $data=$p;unset($data['id']);$data['metodo_pago']=$method;$data['banco_id']=$bank['id']??0;$data['banco_uid']=$bank['uid']??'';$data['banco_nombre']=$bank['nombre']??'';if($id)$this->updateRaw($db,'gastos',$id,$data);else$id=$this->insertRaw($db,'gastos',$data);$db->commit();return['success'=>true,'data'=>['id'=>$id]];}catch(\Throwable$e){if($db->inTransaction())$db->rollBack();throw$e;}
+            $data=$p;unset($data['id']);$data['metodo_pago']=$method;$data['banco_id']=$bank['id']??0;$data['banco_uid']=$bank['uid']??'';$data['banco_nombre']=$bank['nombre']??'';if($id)$this->updateRaw($db,$project,'gastos',$id,$data);else$id=$this->insertRaw($db,$project,'gastos',$data);$db->commit();return['success'=>true,'data'=>['id'=>$id]];}catch(\Throwable$e){if($db->inTransaction())$db->rollBack();throw$e;}
     }
 
     private function eliminarGasto(PDO $db, int $id): array
@@ -353,21 +354,21 @@ final class SystemRuntimeService
     private function bank(PDO $db,int $id,string $uid):array|false { if($uid!==''){$stmt=$db->prepare('SELECT * FROM bancos WHERE uid=? LIMIT 1');$stmt->execute([$uid]);}else{$stmt=$db->prepare('SELECT * FROM bancos WHERE id=? LIMIT 1');$stmt->execute([$id]);}return$stmt->fetch(); }
     private function changeBank(PDO $db,int $id,string $uid,float $delta):void { $bank=$this->bank($db,$id,$uid);if(!$bank)throw new RuntimeException('No se encontro el banco asociado.');$db->prepare('UPDATE bancos SET saldo=?,fecha_transaccion=?,updated_at=? WHERE id=?')->execute([(float)$bank['saldo']+$delta,gmdate('Y-m-d H:i:s'),gmdate('Y-m-d H:i:s'),(int)$bank['id']]); }
 
-    private function registrarPrecios(PDO $db,array $p):array { foreach((array)($p['cambios']??[])as$change)if((string)($change['anterior']??'')!==(string)($change['nuevo']??''))$this->insertRaw($db,'historial_precios',['tabla'=>$p['tabla']??'','producto_id'=>$p['producto_id']??0,'producto_nombre'=>$p['producto_nombre']??'','campo'=>$change['campo']??'','valor_anterior'=>$change['anterior']??'','valor_nuevo'=>$change['nuevo']??'','usuario'=>'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true]; }
+    private function registrarPrecios(PDO $db,array $project,array $p):array { foreach((array)($p['cambios']??[])as$change)if((string)($change['anterior']??'')!==(string)($change['nuevo']??''))$this->insertRaw($db,$project,'historial_precios',['tabla'=>$p['tabla']??'','producto_id'=>$p['producto_id']??0,'producto_nombre'=>$p['producto_nombre']??'','campo'=>$change['campo']??'','valor_anterior'=>$change['anterior']??'','valor_nuevo'=>$change['nuevo']??'','usuario'=>'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true]; }
 
-    private function transferir(PDO $db, array $p): array
+    private function transferir(PDO $db, array $project, array $p): array
     {
         $tableName=(string)($p['tabla']??''); if(!in_array($tableName,['imei','serial','accesorios','electrodomesticos','piezas'],true)) throw new InvalidArgumentException('Tabla no permitida.');
         $table=$this->table($db,$tableName); $db->beginTransaction();
-        try { foreach((array)($p['items']??[]) as $item){ $id=(int)($item['id']??0); if($tableName==='accesorios' && (float)($item['cantidad']??1)>0){ $stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$qty=(float)$item['cantidad'];if((float)$row['cantidad']<$qty)throw new RuntimeException('Cantidad insuficiente.');$db->prepare("UPDATE $table SET cantidad=cantidad-?,updated_at=? WHERE id=?")->execute([$qty,gmdate('Y-m-d H:i:s'),$id]);$copy=$row;unset($copy['id']);$copy['cantidad']=$qty;$copy['almacen_id']=(int)($p['destino_id']??0);$copy['almacen_uid']=(string)($p['destino_uid']??'');$copy['uid']=Support::uid('rec_');$this->insertRaw($db,$tableName,$copy);}else{$db->prepare("UPDATE $table SET almacen_id=?,almacen_uid=?,updated_at=? WHERE id=?")->execute([(int)($p['destino_id']??0),(string)($p['destino_uid']??''),gmdate('Y-m-d H:i:s'),$id]);}} if(!empty($p['transferencia']))$this->insertRaw($db,'transferencias',(array)$p['transferencia']);$db->commit();return['success'=>true];}catch(\Throwable $e){if($db->inTransaction())$db->rollBack();throw$e;}
+        try { foreach((array)($p['items']??[]) as $item){ $id=(int)($item['id']??0); if($tableName==='accesorios' && (float)($item['cantidad']??1)>0){ $stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$qty=(float)$item['cantidad'];if((float)$row['cantidad']<$qty)throw new RuntimeException('Cantidad insuficiente.');$db->prepare("UPDATE $table SET cantidad=cantidad-?,updated_at=? WHERE id=?")->execute([$qty,gmdate('Y-m-d H:i:s'),$id]);$copy=$row;unset($copy['id']);$copy['cantidad']=$qty;$copy['almacen_id']=(int)($p['destino_id']??0);$copy['almacen_uid']=(string)($p['destino_uid']??'');$copy['uid']=Support::uid('rec_');$this->insertRaw($db,$project,$tableName,$copy);}else{$db->prepare("UPDATE $table SET almacen_id=?,almacen_uid=?,updated_at=? WHERE id=?")->execute([(int)($p['destino_id']??0),(string)($p['destino_uid']??''),gmdate('Y-m-d H:i:s'),$id]);}} if(!empty($p['transferencia']))$this->insertRaw($db,$project,'transferencias',(array)$p['transferencia']);$db->commit();return['success'=>true];}catch(\Throwable $e){if($db->inTransaction())$db->rollBack();throw$e;}
     }
 
-    private function ajustar(PDO $db, array $p): array
+    private function ajustar(PDO $db, array $project, array $p): array
     {
-        $tableName=(string)($p['tabla']??'');$table=$this->table($db,$tableName);$id=(int)($p['producto_id']??0);$stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$before=(float)($row['cantidad']??0);$after=(float)($p['cantidad_nueva']??0);$db->prepare("UPDATE $table SET cantidad=?,updated_at=? WHERE id=?")->execute([$after,gmdate('Y-m-d H:i:s'),$id]);$this->insertRaw($db,'ajustes_inventario',['tabla'=>$tableName,'producto_id'=>$id,'producto_nombre'=>$row['nombre']??'','cantidad_anterior'=>$before,'cantidad_nueva'=>$after,'diferencia'=>$after-$before,'tipo'=>$p['tipo']??'','motivo'=>$p['motivo']??'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true,'data'=>['anterior'=>$before,'nueva'=>$after,'diferencia'=>$after-$before]];
+        $tableName=(string)($p['tabla']??'');$table=$this->table($db,$tableName);$id=(int)($p['producto_id']??0);$stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$before=(float)($row['cantidad']??0);$after=(float)($p['cantidad_nueva']??0);$db->prepare("UPDATE $table SET cantidad=?,updated_at=? WHERE id=?")->execute([$after,gmdate('Y-m-d H:i:s'),$id]);$this->insertRaw($db,$project,'ajustes_inventario',['tabla'=>$tableName,'producto_id'=>$id,'producto_nombre'=>$row['nombre']??'','cantidad_anterior'=>$before,'cantidad_nueva'=>$after,'diferencia'=>$after-$before,'tipo'=>$p['tipo']??'','motivo'=>$p['motivo']??'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true,'data'=>['anterior'=>$before,'nueva'=>$after,'diferencia'=>$after-$before]];
     }
 
-    private function consultaServidor(PDO $db, array $args): mixed
+    private function consultaServidor(PDO $db, array $project, array $args): mixed
     {
         $op=(string)($args[0]??'');$name=(string)($args[1]??'');
         if($op==='getAllConfig')return['VITE_LINKURL'=>'','VITE_LINK_API'=>'','VITE_TOKEN'=>'','VITE_PATRON_TELEFONO'=>'^[0-9]{10}$','VITE_IMPRESORA_LOCAL'=>'','VITE_PATRON_CEDULA'=>'^[0-9]{11}$','VITE_TOKEN_CORTO'=>'','SERVIDORLOCAL'=>'','OFFLINE'=>'true'];
@@ -399,11 +400,11 @@ final class SystemRuntimeService
         }
         if(in_array($op,['insertData','insertMultipleData'],true)){
             $payload=$this->legacyPayload($args[2]??[]);$rows=$op==='insertMultipleData'&&array_is_list($payload)?$payload:[$payload];$ids=[];
-            $db->beginTransaction();try{foreach($rows as$row)$ids[]=$this->insertRaw($db,$name,(array)$row);$db->commit();}catch(\Throwable$e){if($db->inTransaction())$db->rollBack();throw$e;}
+            $db->beginTransaction();try{foreach($rows as$row)$ids[]=$this->insertRaw($db,$project,$name,(array)$row);$db->commit();}catch(\Throwable$e){if($db->inTransaction())$db->rollBack();throw$e;}
             return['ok',['ids'=>$ids]];
         }
         if($op==='updateData'){
-            $payload=$this->legacyPayload($args[2]??[]);$id=(int)($payload['id']??0);if($id<1)throw new InvalidArgumentException('ID requerido para actualizar.');$this->row($db,$this->table($db,$name),$id);$this->updateRaw($db,$name,$id,$payload);return['ok'];
+            $payload=$this->legacyPayload($args[2]??[]);$id=(int)($payload['id']??0);if($id<1)throw new InvalidArgumentException('ID requerido para actualizar.');$this->row($db,$this->table($db,$name),$id);$this->updateRaw($db,$project,$name,$id,$payload);return['ok'];
         }
         if($op==='updateDataByField'){
             $field=(string)($args[2]??'');$value=$args[3]??null;$payload=$this->legacyPayload($args[4]??[]);$table=$this->table($db,$name);
@@ -458,8 +459,8 @@ final class SystemRuntimeService
     private function bitacora(PDO $db,int $limit):array { if(!$this->exists($db,'bitacora'))return['success'=>true,'data'=>[]];$limit=max(1,min(5000,$limit));return['success'=>true,'data'=>$db->query("SELECT * FROM bitacora ORDER BY id DESC LIMIT $limit")->fetchAll()]; }
     private function clearBitacora(PDO $db):array { if($this->exists($db,'bitacora'))$db->exec('DELETE FROM bitacora');return['success'=>true]; }
     private function audit(PDO $db,string $table,int $id,string $action,array $actor,mixed $new,mixed $old):void { if(!$this->exists($db,'bitacora'))return;try{$stmt=$db->prepare('INSERT INTO bitacora(tabla,registro_id,accion,usuario,datos_nuevos,datos_anteriores,uid,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)');$now=gmdate('Y-m-d H:i:s');$stmt->execute([$table,$id,$action,(string)($actor['email']??''),json_encode($new,JSON_UNESCAPED_UNICODE),json_encode($old,JSON_UNESCAPED_UNICODE),Support::uid('rec_'),$now,$now]);}catch(\Throwable){} }
-    private function insertRaw(PDO $db,string $tableName,array $data):int { $this->table($db,$tableName);$data=$this->cleanData($db,$tableName,$data,true);$now=gmdate('Y-m-d H:i:s');if($this->hasColumn($db,$tableName,'uid')&&empty($data['uid']))$data['uid']=Support::uid('rec_');if($this->hasColumn($db,$tableName,'created_at')&&empty($data['created_at']))$data['created_at']=$now;if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=$now;$cols=array_keys($data);$db->prepare('INSERT INTO '.Support::quoteIdentifier($tableName).' ('.implode(',',array_map([Support::class,'quoteIdentifier'],$cols)).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).')')->execute(array_values($data));return(int)$db->lastInsertId(); }
-    private function updateRaw(PDO $db,string $tableName,int $id,array $data):void { $data=$this->cleanData($db,$tableName,$data,false);if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=gmdate('Y-m-d H:i:s');unset($data['id']);if(!$data)return;$set=implode(',',array_map(fn($c)=>Support::quoteIdentifier($c).'=?',array_keys($data)));$db->prepare('UPDATE '.Support::quoteIdentifier($tableName)." SET $set WHERE id=?")->execute([...array_values($data),$id]); }
+    private function insertRaw(PDO $db,array $project,string $tableName,array $data):int { $this->table($db,$tableName);$data=$this->cleanData($db,$tableName,$data,true);$now=gmdate('Y-m-d H:i:s');if($this->hasColumn($db,$tableName,'uid')&&empty($data['uid']))$data['uid']=Support::uid('rec_');if($this->hasColumn($db,$tableName,'created_at')&&empty($data['created_at']))$data['created_at']=$now;if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=$now;$cols=array_keys($data);$db->prepare('INSERT INTO '.Support::quoteIdentifier($tableName).' ('.implode(',',array_map([Support::class,'quoteIdentifier'],$cols)).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).')')->execute(array_values($data));$id=(int)$db->lastInsertId();$this->webhooks->dispatch('record.created',$project,$tableName,$this->row($db,$this->table($db,$tableName),$id));return$id; }
+    private function updateRaw(PDO $db,array $project,string $tableName,int $id,array $data):void { $data=$this->cleanData($db,$tableName,$data,false);if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=gmdate('Y-m-d H:i:s');unset($data['id']);if(!$data)return;$set=implode(',',array_map(fn($c)=>Support::quoteIdentifier($c).'=?',array_keys($data)));$db->prepare('UPDATE '.Support::quoteIdentifier($tableName)." SET $set WHERE id=?")->execute([...array_values($data),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$this->table($db,$tableName),$id)); }
     private function ensureAccessoryCommissionColumns(PDO $db, string $table): void
     {
         if ($table !== 'accesorios') return;
