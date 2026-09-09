@@ -13,6 +13,7 @@ use App\Services\ImportExportService;
 use App\Services\InstallerService;
 use App\Services\LogService;
 use App\Services\ProjectService;
+use App\Services\RealtimeService;
 use App\Services\RecordService;
 use App\Services\SchemaService;
 use App\Services\StorageService;
@@ -53,6 +54,7 @@ final class WebController
         private MailService $mail,
         private ApkFileService $apkFiles,
         private SystemAppService $systemApps,
+        private RealtimeService $realtime,
     ) {
     }
 
@@ -139,6 +141,7 @@ final class WebController
             Http::flash('success', 'Project created.');
             Flight::redirect('/projects/' . $project['uid']);
         }));
+        Flight::route('GET /projects/trash', fn () => $this->page(fn () => $this->trashPage()));
         Flight::route('GET /projects/@uid', fn (string $uid) => $this->page(fn () => $this->project($uid)));
         Flight::route('POST /projects/@uid/system-app', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
             $systemApp = (string) ($in['system_app'] ?? 'default');
@@ -186,10 +189,33 @@ final class WebController
             Http::flash('success', 'API keys regenerated.');
             Flight::redirect('/projects/' . $uid . '?tab=settings');
         }));
+        Flight::route('POST /projects/@uid/block', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $reason = trim((string) ($in['reason'] ?? ''));
+            $project = $this->projects->block($uid, $reason);
+            $this->realtime->broadcast('project.blocked', $project, null, ['reason' => $reason, 'blocked_at' => $project['blocked_at']]);
+            Http::flash('success', 'Project blocked.');
+            Flight::redirect('/projects/' . $uid . '?tab=settings');
+        }));
+        Flight::route('POST /projects/@uid/unblock', fn (string $uid) => $this->action(function () use ($uid): void {
+            $project = $this->projects->unblock($uid);
+            $this->realtime->broadcast('project.unblocked', $project, null, ['unblocked_at' => $project['updated_at']]);
+            Http::flash('success', 'Project unblocked.');
+            Flight::redirect('/projects/' . $uid . '?tab=settings');
+        }));
         Flight::route('POST /projects/@uid/delete', fn (string $uid) => $this->action(function () use ($uid): void {
-            $this->projects->delete($uid);
-            Http::flash('success', 'Project and its stored data were deleted.');
+            $this->projects->archive($uid);
+            Http::flash('success', 'Project moved to trash. You can restore it from Papelera.');
             Flight::redirect('/dashboard');
+        }));
+        Flight::route('POST /projects/@uid/restore', fn (string $uid) => $this->action(function () use ($uid): void {
+            $this->projects->restore($uid);
+            Http::flash('success', 'Project restored.');
+            Flight::redirect('/projects/trash');
+        }));
+        Flight::route('POST /projects/@uid/purge', fn (string $uid) => $this->action(function () use ($uid): void {
+            $this->projects->delete($uid);
+            Http::flash('success', 'Project permanently deleted.');
+            Flight::redirect('/projects/trash');
         }));
         Flight::route('POST /projects/@uid/tables', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
             $project = $this->projects->find($uid);
@@ -734,6 +760,15 @@ final class WebController
             'title' => 'Dashboard', 'projects' => $projects, 'projectCount' => count($projects),
             'tableCount' => $tables, 'recordCount' => $records, 'logs' => $this->logs->recent(null, 12),
             'systemApps' => $this->systemApps->all(),
+            'flashes' => Http::flashes(),
+        ]);
+    }
+
+    private function trashPage(): void
+    {
+        $archived = array_values(array_filter($this->projects->all(true), fn (array $p) => ($p['status'] ?? '') === 'archived'));
+        View::render('projects-trash', [
+            'title' => 'Papelera', 'projects' => $archived,
             'flashes' => Http::flashes(),
         ]);
     }

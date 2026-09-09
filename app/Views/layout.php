@@ -42,6 +42,7 @@ $flashes = $flashes ?? [];
             <a href="/apk-files" class="nav-link">Archivos APK</a>
             <a href="/mail-settings" class="nav-link">Correo OTP</a>
             <a href="/licenses" class="nav-link">Licenses</a>
+            <a href="/projects/trash" class="nav-link">Papelera</a>
         </nav>
         <div class="absolute inset-x-4 bottom-4 rounded-xl border border-line bg-panel p-3 text-xs text-slate-400">
             Signed in as <strong class="mt-1 block truncate text-slate-200"><?= e(Auth::user()['email'] ?? '') ?></strong>

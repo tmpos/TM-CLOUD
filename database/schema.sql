@@ -22,6 +22,9 @@ CREATE TABLE projects (
     public_key TEXT UNIQUE NOT NULL,
     secret_key TEXT UNIQUE NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
+    blocked_reason TEXT,
+    blocked_at TEXT,
+    archived_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

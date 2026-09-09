@@ -218,7 +218,7 @@ final class ApiController
                 $job = $this->mail->queue($project['uid'], $template, $recipient, $data);
                 Flight::json(['data' => ['mail' => $job, 'share' => $share]], 202);
             } catch (\Throwable $e) {
-                $status = in_array($e->getCode(), [403, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+                $status = in_array($e->getCode(), [403, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
                 Http::error($e, $status);
             }
         });
@@ -250,7 +250,7 @@ final class ApiController
                 );
                 Flight::json(['data' => ['share' => $share]], 201);
             } catch (\Throwable $e) {
-                $status = in_array($e->getCode(), [403, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+                $status = in_array($e->getCode(), [403, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
                 Http::error($e, $status);
             }
         });
@@ -543,7 +543,7 @@ final class ApiController
             $this->metrics->track('api_request', $projectUid);
             $callback($project);
         } catch (\Throwable $e) {
-            $status = in_array($e->getCode(), [401, 403, 404, 413, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+            $status = in_array($e->getCode(), [401, 403, 404, 413, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
             Http::error($e, $status);
         }
     }
@@ -559,7 +559,7 @@ final class ApiController
             $this->metrics->track('api_request', $projectUid);
             $callback($project);
         } catch (\Throwable $e) {
-            Http::error($e, in_array($e->getCode(), [401, 403, 413, 429], true) ? $e->getCode() : 400);
+            Http::error($e, in_array($e->getCode(), [401, 403, 413, 423, 429], true) ? $e->getCode() : 400);
         }
     }
 
@@ -571,7 +571,7 @@ final class ApiController
             $this->metrics->track('api_request', $projectUid);
             $callback($project);
         } catch (\Throwable $e) {
-            $status = in_array($e->getCode(), [401, 403, 404, 413, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+            $status = in_array($e->getCode(), [401, 403, 404, 413, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
             Http::error($e, $status);
         }
     }

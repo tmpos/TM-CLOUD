@@ -17,7 +17,7 @@
         <?php foreach ($projects as $project): ?>
         <a href="/projects/<?= e($project['uid']) ?>" data-project-row data-search="<?= e(mb_strtolower($project['name'] . ' ' . $project['slug'])) ?>" class="flex items-center justify-between border-b border-line/70 p-5 transition hover:bg-white/[.02]">
             <div><strong class="text-white"><?= e($project['name']) ?></strong><p class="mt-1 text-xs text-slate-500"><?= e($project['description'] ?: $project['slug']) ?></p></div>
-            <span class="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300"><?= e($project['status']) ?></span>
+            <div class="flex items-center gap-2"><?php if ($project['status'] === 'blocked'): ?><span class="rounded-full bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-300">Blocked</span><?php endif; ?><span class="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300"><?= e($project['status']) ?></span></div>
         </a>
         <?php endforeach; ?>
         <p id="project-search-empty" class="hidden p-8 text-center text-sm text-slate-600">No hay proyectos que coincidan con la busqueda.</p>

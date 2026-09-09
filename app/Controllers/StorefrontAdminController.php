@@ -157,7 +157,7 @@ final class StorefrontAdminController
             $sale = $this->admins->createPosSale($store, $input, $this->admins->user() ?? []);
             Flight::json(['data' => $sale], 201);
         } catch (\Throwable $e) {
-            Http::error($e, in_array($e->getCode(), [401, 403, 422], true) ? $e->getCode() : 400);
+            Http::error($e, in_array($e->getCode(), [401, 403, 422, 423], true) ? $e->getCode() : 400);
         }
     }
 

@@ -92,7 +92,7 @@ final class SystemController
                 $_SESSION['system_project_users'][$project['uid']] = $this->safeUser((array) $result['data']);
                 Flight::redirect('/sistema/' . rawurlencode((string) $project['slug']));
             } catch (\Throwable $e) {
-                http_response_code(in_array($e->getCode(), [404, 429], true) ? $e->getCode() : 401);
+                http_response_code(in_array($e->getCode(), [404, 423, 429], true) ? $e->getCode() : 401);
                 $this->render('system-project-login', ['title' => $project['name'] ?? 'TMPOS', 'project' => $project, 'error' => $e->getMessage()], false);
             }
         });
@@ -224,7 +224,7 @@ final class SystemController
             if (!$systemUser) throw new \RuntimeException('La sesion expiro.', 401);
             $callback($project, $systemUser);
         } catch (\Throwable $e) {
-            $status = in_array($e->getCode(), [401, 403, 404, 409, 422], true) ? $e->getCode() : 400;
+            $status = in_array($e->getCode(), [401, 403, 404, 409, 422, 423], true) ? $e->getCode() : 400;
             Http::error($e, $status);
         }
     }
@@ -250,7 +250,7 @@ final class SystemController
     {
         if (!PortalAuth::check()) { Flight::redirect('/sistema/login'); return; }
         try { $callback(); }
-        catch (\Throwable $e) { http_response_code(in_array($e->getCode(), [403,404], true) ? $e->getCode() : 400); $this->render('system-error', ['title' => 'No disponible', 'error' => $e->getMessage()]); }
+        catch (\Throwable $e) { http_response_code(in_array($e->getCode(), [403,404,423], true) ? $e->getCode() : 400); $this->render('system-error', ['title' => 'No disponible', 'error' => $e->getMessage()]); }
     }
 
     private function render(string $template, array $data, bool $withLayout = true): void

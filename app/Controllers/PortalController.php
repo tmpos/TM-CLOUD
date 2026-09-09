@@ -96,7 +96,7 @@ final class PortalController
     {
         if (!PortalAuth::check()) { Flight::redirect('/portal/login'); return; }
         try { $callback(); }
-        catch (\Throwable $e) { http_response_code(in_array($e->getCode(), [403,404], true) ? $e->getCode() : 400); $this->render('portal-error', ['title' => 'No disponible', 'error' => $e->getMessage()]); }
+        catch (\Throwable $e) { http_response_code(in_array($e->getCode(), [403,404,423], true) ? $e->getCode() : 400); $this->render('portal-error', ['title' => 'No disponible', 'error' => $e->getMessage()]); }
     }
 
     private function authorizedProject(string $uid): array

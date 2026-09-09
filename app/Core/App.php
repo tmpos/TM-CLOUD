@@ -79,7 +79,7 @@ final class App
         $metrics = new MetricsService($db);
         $migrations = new MigrationService($db, $config['storage']);
 
-        (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge, $pdf, $functions, $metrics, $migrations, $mail, $apkFiles, $systemApps))->register();
+        (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge, $pdf, $functions, $metrics, $migrations, $mail, $apkFiles, $systemApps, $realtime))->register();
         (new PortalController($config, $portalAuth, $projects, $schema, $records, $pdf, $sharedDocuments, $keys))->register();
         (new SystemController($portalAuth, $projects, $systemRuntime, $keys, $systemApps, $projectSql, $storage))->register();
         (new StorefrontController($config, $storefronts, $projects, $records, $pdf, $keys, $storefrontCommerce, $mail))->register();

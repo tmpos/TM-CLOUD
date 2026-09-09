@@ -15,9 +15,12 @@ final class ProjectService
     {
     }
 
-    public function all(): array
+    public function all(bool $includeArchived = false): array
     {
-        return $this->db->query('SELECT * FROM projects ORDER BY id DESC')->fetchAll();
+        if ($includeArchived) {
+            return $this->db->query('SELECT * FROM projects ORDER BY id DESC')->fetchAll();
+        }
+        return $this->db->query("SELECT * FROM projects WHERE status <> 'archived' ORDER BY id DESC")->fetchAll();
     }
 
     public function find(string $uid): array
@@ -30,10 +33,54 @@ final class ProjectService
     public function findActive(string $uid): array
     {
         $project = $this->find($uid);
-        if (($project['status'] ?? '') !== 'active') {
-            throw new RuntimeException('Project is not active.', 403);
+        $status = (string) ($project['status'] ?? '');
+        if ($status === 'blocked') {
+            $reason = trim((string) ($project['blocked_reason'] ?? ''));
+            throw new RuntimeException($reason !== '' ? $reason : 'This project has been blocked by the administrator.', 423);
+        }
+        if ($status !== 'active') {
+            throw new RuntimeException('Project not found.', 404);
         }
         return $project;
+    }
+
+    public function block(string $uid, string $reason): array
+    {
+        $this->find($uid);
+        $reason = trim($reason);
+        $stmt = $this->db->prepare("UPDATE projects SET status = 'blocked', blocked_reason = ?, blocked_at = ?, updated_at = ? WHERE uid = ?");
+        $now = Support::now();
+        $stmt->execute([$reason !== '' ? $reason : null, $now, $now, $uid]);
+        $this->logs->write('project.blocked', $uid, null, null, null, ['reason' => $reason]);
+        return $this->find($uid);
+    }
+
+    public function unblock(string $uid): array
+    {
+        $this->find($uid);
+        $stmt = $this->db->prepare("UPDATE projects SET status = 'active', blocked_reason = NULL, blocked_at = NULL, updated_at = ? WHERE uid = ?");
+        $stmt->execute([Support::now(), $uid]);
+        $this->logs->write('project.unblocked', $uid);
+        return $this->find($uid);
+    }
+
+    public function archive(string $uid): array
+    {
+        $this->find($uid);
+        $now = Support::now();
+        $stmt = $this->db->prepare("UPDATE projects SET status = 'archived', archived_at = ?, updated_at = ? WHERE uid = ?");
+        $stmt->execute([$now, $now, $uid]);
+        $this->logs->write('project.archived', $uid);
+        return $this->find($uid);
+    }
+
+    public function restore(string $uid): array
+    {
+        $this->find($uid);
+        $stmt = $this->db->prepare("UPDATE projects SET status = 'active', archived_at = NULL, updated_at = ? WHERE uid = ?");
+        $stmt->execute([Support::now(), $uid]);
+        $this->logs->write('project.restored', $uid);
+        return $this->find($uid);
     }
 
     public function findActiveBySlug(string $slug): array

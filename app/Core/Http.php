@@ -26,6 +26,7 @@ final class Http
             $status === 409 => 'conflict',
             $status === 413 => 'quota_exceeded',
             $status === 422 => 'validation_error',
+            $status === 423 => 'project_blocked',
             $status === 429 => 'rate_limited',
             $status >= 500 => 'internal_error',
             default => 'request_failed',
