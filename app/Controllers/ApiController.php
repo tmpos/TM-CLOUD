@@ -467,7 +467,9 @@ final class ApiController
             $rows = isset($input['rows']) && is_array($input['rows'])
                 ? $input['rows']
                 : (array_is_list($input) ? $input : [$input]);
-            Flight::json(['data' => $this->records->upsert($p, $table, $rows, filter_var($input['atomic'] ?? false, FILTER_VALIDATE_BOOL))]);
+            $result = $this->records->upsert($p, $table, $rows, filter_var($input['atomic'] ?? false, FILTER_VALIDATE_BOOL),
+                fn (string $action, array $record) => $this->webhooks->dispatch("record.$action", $p, $table, $record));
+            Flight::json(['data' => $result]);
         }));
         Flight::route('GET /api/@project/@table/export', fn ($project, $table) => $this->run($project, $table, function ($p) use ($table): void {
             $format = ($_GET['format'] ?? 'json') === 'csv' ? 'csv' : 'json';
@@ -487,7 +489,9 @@ final class ApiController
             $rows = isset($input['rows']) && is_array($input['rows'])
                 ? $input['rows']
                 : (array_is_list($input) ? $input : [$input]);
-            Flight::json($this->records->bulk($p, $table, $rows, filter_var($input['atomic'] ?? false, FILTER_VALIDATE_BOOL)), 201);
+            $result = $this->records->bulk($p, $table, $rows, filter_var($input['atomic'] ?? false, FILTER_VALIDATE_BOOL),
+                fn (string $action, array $record) => $this->webhooks->dispatch("record.$action", $p, $table, $record));
+            Flight::json($result, 201);
         }));
         Flight::route('GET /api/@project/@table', fn ($project, $table) => $this->run($project, $table, function ($p) use ($table): void {
             if (filter_var($_GET['all'] ?? false, FILTER_VALIDATE_BOOL)) {

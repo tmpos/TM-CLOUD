@@ -172,7 +172,7 @@ final class RecordService
         return ['deleted' => $deleted, 'failed' => count($errors), 'errors' => $errors];
     }
 
-    public function bulk(array $project, string $table, array $rows, bool $atomic = false): array
+    public function bulk(array $project, string $table, array $rows, bool $atomic = false, ?callable $onChange = null): array
     {
         if (count($rows) > 1000) {
             throw new \InvalidArgumentException('A bulk request may contain at most 1000 rows.');
@@ -187,7 +187,8 @@ final class RecordService
                     if (!is_array($row)) {
                         throw new \InvalidArgumentException('Row must be an object.');
                     }
-                    $this->create($project, $table, $row, false);
+                    $created = $this->create($project, $table, $row, false);
+                    if ($onChange !== null) $onChange('created', $created);
                     $inserted++;
                 } catch (\Throwable $e) {
                     $errors[] = ['row' => $index, 'error' => $e->getMessage()];
@@ -209,7 +210,7 @@ final class RecordService
         return $result;
     }
 
-    public function upsert(array $project, string $table, array $rows, bool $atomic = false): array
+    public function upsert(array $project, string $table, array $rows, bool $atomic = false, ?callable $onChange = null): array
     {
         if (count($rows) > 1000) {
             throw new \InvalidArgumentException('An upsert request may contain at most 1000 rows.');
@@ -229,10 +230,12 @@ final class RecordService
                         $this->find($project, $table, (string) $row['uid']);
                         $uid = (string) $row['uid'];
                         unset($row['uid'], $row['created_at']);
-                        $this->update($project, $table, $uid, $row, false);
+                        $updatedRow = $this->update($project, $table, $uid, $row, false);
+                        if ($onChange !== null) $onChange('updated', $updatedRow);
                         $updated++;
                     } catch (RuntimeException) {
-                        $this->create($project, $table, $row, false);
+                        $createdRow = $this->create($project, $table, $row, false);
+                        if ($onChange !== null) $onChange('created', $createdRow);
                         $inserted++;
                     }
                 } catch (\Throwable $e) {
