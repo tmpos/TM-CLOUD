@@ -132,7 +132,6 @@ final class RealtimeServer implements MessageComponentInterface
 
     public function broadcast(string $projectUid, string $event, ?string $table, mixed $record): void
     {
-        error_log('[Realtime DEBUG] broadcast called for ' . $projectUid . ' event=' . $event . ' subscribers=' . count($this->projects[$projectUid] ?? []) . ' known_projects=' . implode(',', array_keys($this->projects)));
         if (!isset($this->projects[$projectUid])) return;
 
         $payload = json_encode([
@@ -161,7 +160,6 @@ final class RealtimeServer implements MessageComponentInterface
 
         $tcpServer = new SocketServer("0.0.0.0:$eventPort", [], $loop);
         $tcpServer->on('connection', function (ReactConnection $conn) use ($server): void {
-            error_log('[Realtime DEBUG] tcp connection accepted');
             $buffer = '';
             $conn->on('data', function (string $data) use ($server, $conn, &$buffer): void {
                 $buffer .= $data;
@@ -169,7 +167,6 @@ final class RealtimeServer implements MessageComponentInterface
                     $line = substr($buffer, 0, $pos);
                     $buffer = substr($buffer, $pos + 1);
                     $body = json_decode($line, true);
-                    error_log('[Realtime DEBUG] tcp data line=' . $line);
                     if ($body && isset($body['project_uid'], $body['event'])) {
                         $server->broadcast(
                             $body['project_uid'],
