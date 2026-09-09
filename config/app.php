@@ -22,6 +22,14 @@ return [
     'backup_retention_count' => max(1, (int) (getenv('BACKUP_RETENTION_COUNT') ?: 20)),
     'backup_retention_days' => max(1, (int) (getenv('BACKUP_RETENTION_DAYS') ?: 90)),
     'backup_max_bytes_per_project' => ((int) (getenv('BACKUP_MAX_MB_PER_PROJECT') ?: 5120)) * 1024 * 1024,
+    'minio' => [
+        'enabled' => filter_var(getenv('MINIO_ENABLED') ?: false, FILTER_VALIDATE_BOOL),
+        'endpoint' => rtrim((string) (getenv('MINIO_ENDPOINT') ?: ''), '/'),
+        'region' => getenv('MINIO_REGION') ?: 'us-east-1',
+        'bucket' => getenv('MINIO_BUCKET') ?: 'tmpbase-backups',
+        'access_key' => getenv('MINIO_ACCESS_KEY') ?: '',
+        'secret_key' => getenv('MINIO_SECRET_KEY') ?: '',
+    ],
     'mail' => [
         'enabled' => filter_var(getenv('MAIL_ENABLED') ?: false, FILTER_VALIDATE_BOOL),
         'host' => getenv('MAIL_HOST') ?: '',

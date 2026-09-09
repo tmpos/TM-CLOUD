@@ -11,7 +11,7 @@ use RuntimeException;
 
 final class BackupService
 {
-    public function __construct(private PDO $db, private array $config, private LogService $logs)
+    public function __construct(private PDO $db, private array $config, private LogService $logs, private ?S3ClientService $s3 = null)
     {
     }
 
@@ -33,6 +33,7 @@ final class BackupService
             'uid' => $backup['uid'], 'project_uid' => $backup['project_uid'],
             'size' => (int) $backup['size'], 'checksum' => $backup['checksum'] ?? null,
             'status' => $backup['status'] ?? 'valid', 'created_at' => $backup['created_at'],
+            'offsite' => !empty($backup['remote_path']),
         ];
     }
 
@@ -57,7 +58,22 @@ final class BackupService
             ->execute([$uid, $project['uid'], $path, $size, $checksum, $createdAt]);
         $this->cleanup($project['uid']);
         $this->logs->write('backup.created', $project['uid'], null, $uid, null, ['checksum' => $checksum, 'size' => $size]);
-        return ['uid' => $uid, 'project_uid' => $project['uid'], 'file_path' => $path, 'size' => $size, 'checksum' => $checksum, 'status' => 'valid', 'created_at' => $createdAt];
+        $remotePath = ($this->config['minio']['enabled'] ?? false) ? $this->mirror($project['uid'], $uid, $path) : null;
+        return ['uid' => $uid, 'project_uid' => $project['uid'], 'file_path' => $path, 'size' => $size, 'checksum' => $checksum, 'status' => 'valid', 'created_at' => $createdAt, 'remote_path' => $remotePath];
+    }
+
+    private function mirror(string $projectUid, string $uid, string $path): ?string
+    {
+        $key = 'backups/' . $projectUid . '/' . basename($path);
+        try {
+            if (!$this->s3?->putObject($key, $path)) throw new RuntimeException('MinIO upload returned a non-2xx response.');
+            $this->db->prepare('UPDATE backups SET remote_path = ? WHERE uid = ?')->execute([$key, $uid]);
+            $this->logs->write('backup.mirrored', $projectUid, null, $uid, null, ['remote_path' => $key]);
+            return $key;
+        } catch (\Throwable $e) {
+            $this->logs->write('backup.mirror_failed', $projectUid, null, $uid, null, ['error' => $e->getMessage()]);
+            return null;
+        }
     }
 
     public function find(string $uid, string $projectUid): array

@@ -530,7 +530,7 @@ SQL);
         foreach (['project_url','public_key','secret_key','almacen','nombre','link','token','tipo','dispositivos','ultimopago','proximopago','precio','encargado','telefono','email','direccion','rnc','usuario','identificadordb','role_key','equipos_no_autorizados'] as $col) {
             try { $db->exec("ALTER TABLE licenses ADD COLUMN $col TEXT"); } catch (\Throwable) {}
         }
-        foreach (['ALTER TABLE backups ADD COLUMN checksum TEXT', "ALTER TABLE backups ADD COLUMN status TEXT NOT NULL DEFAULT 'valid'"] as $migration) {
+        foreach (['ALTER TABLE backups ADD COLUMN checksum TEXT', "ALTER TABLE backups ADD COLUMN status TEXT NOT NULL DEFAULT 'valid'", 'ALTER TABLE backups ADD COLUMN remote_path TEXT'] as $migration) {
             try { $db->exec($migration); } catch (\Throwable) {}
         }
         try { $db->exec("ALTER TABLE projects ADD COLUMN system_app TEXT NOT NULL DEFAULT 'default'"); } catch (\Throwable) {}
