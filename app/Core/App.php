@@ -19,6 +19,7 @@ use App\Services\LogService;
 use App\Services\ProjectService;
 use App\Services\ProjectSqlApiService;
 use App\Services\RecordService;
+use App\Services\S3ClientService;
 use App\Services\SchemaService;
 use App\Services\StorageService;
 use App\Services\ApkFileService;
@@ -54,7 +55,8 @@ final class App
         $schema = new SchemaService($projects, $logs);
         $records = new RecordService($schema, $logs);
         $transfer = new ImportExportService($records);
-        $backups = new BackupService($db, $config, $logs);
+        $s3Client = new S3ClientService($config['minio'] ?? []);
+        $backups = new BackupService($db, $config, $logs, $s3Client);
         $storage = new StorageService($config, $schema, $logs);
         $apkFiles = new ApkFileService($config);
         $systemApps = new SystemAppService($config);

@@ -80,6 +80,12 @@ TRUSTED_PROXIES=
 BACKUP_RETENTION_COUNT=20
 BACKUP_RETENTION_DAYS=90
 BACKUP_MAX_MB_PER_PROJECT=5120
+MINIO_ENABLED=false
+MINIO_ENDPOINT=https://minio.your-domain.tld
+MINIO_REGION=us-east-1
+MINIO_BUCKET=tmpbase-backups
+MINIO_ACCESS_KEY=
+MINIO_SECRET_KEY=
 MAIL_ENABLED=true
 MAIL_HOST=smtp.your-provider.tld
 MAIL_PORT=587
@@ -144,6 +150,11 @@ https://your-domain.tld/app/Core/Database.php
 
 Also verify login, project creation, table creation, an API request, file
 upload and a manual backup.
+
+If `MINIO_ENABLED=true`, backups are also mirrored to the configured S3-compatible
+bucket after the local snapshot is created and verified. A MinIO outage never fails
+the local backup; check the logs for `backup.mirror_failed` entries if a mirror
+does not appear in the bucket.
 
 ## Updating
 

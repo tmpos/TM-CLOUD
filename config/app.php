@@ -26,6 +26,14 @@ return [
     'alert_storage_threshold_percent' => (int) (getenv('ALERT_STORAGE_THRESHOLD_PERCENT') ?: 90),
     'alert_backup_stale_days' => (int) (getenv('ALERT_BACKUP_STALE_DAYS') ?: 2),
     'alert_cooldown_hours' => (int) (getenv('ALERT_COOLDOWN_HOURS') ?: 24),
+    'minio' => [
+        'enabled' => filter_var(getenv('MINIO_ENABLED') ?: false, FILTER_VALIDATE_BOOL),
+        'endpoint' => rtrim((string) (getenv('MINIO_ENDPOINT') ?: ''), '/'),
+        'region' => getenv('MINIO_REGION') ?: 'us-east-1',
+        'bucket' => getenv('MINIO_BUCKET') ?: 'tmpbase-backups',
+        'access_key' => getenv('MINIO_ACCESS_KEY') ?: '',
+        'secret_key' => getenv('MINIO_SECRET_KEY') ?: '',
+    ],
     'mail' => [
         'enabled' => filter_var(getenv('MAIL_ENABLED') ?: false, FILTER_VALIDATE_BOOL),
         'host' => getenv('MAIL_HOST') ?: '',
