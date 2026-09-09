@@ -35,6 +35,18 @@ if [ "${MAIL_ENABLED:-false}" = "true" ]; then
     echo "[Entrypoint] Mail worker PID: $MAIL_PID"
 fi
 
+if [ -n "${ALERT_ADMIN_EMAIL:-}" ]; then
+    echo "[Entrypoint] Starting alerts worker..."
+    (
+        while true; do
+            php /var/www/html/bin/alerts-worker || true
+            sleep 300
+        done
+    ) &
+    ALERTS_PID=$!
+    echo "[Entrypoint] Alerts worker PID: $ALERTS_PID"
+fi
+
 # Start Apache in the foreground
 echo "[Entrypoint] Starting Apache..."
 exec apache2-foreground

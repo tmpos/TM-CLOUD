@@ -1,0 +1,42 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use App\Core\Database;
+use App\Core\Env;
+use App\Services\AlertService;
+use App\Services\BackupService;
+use App\Services\LogService;
+use App\Services\MailService;
+use App\Services\MetricsService;
+use App\Services\ProjectService;
+
+$root = dirname(__DIR__);
+require $root . '/vendor/autoload.php';
+require $root . '/app/helpers.php';
+Env::load($root . '/.env');
+$config = require $root . '/config/app.php';
+$db = Database::connect($config['database']);
+Database::migrate($db);
+$logs = new LogService($db);
+$projects = new ProjectService($db, $config, $logs);
+$metrics = new MetricsService($db);
+$backups = new BackupService($db, $config, $logs);
+$mail = new MailService($db, $config['mail'] ?? [], $logs, $config['storage']);
+$alerts = new AlertService($db, $config, $projects, $metrics, $backups, $mail, $logs);
+
+try {
+    $result = $alerts->checkAndNotify();
+    fwrite(STDOUT, sprintf(
+        'checked=%d notified=%d skipped=%d%s',
+        (int) $result['checked'],
+        count($result['notified']),
+        count($result['skipped']),
+        PHP_EOL
+    ));
+    exit(0);
+} catch (Throwable $e) {
+    fwrite(STDERR, $e->getMessage() . PHP_EOL);
+    exit(1);
+}

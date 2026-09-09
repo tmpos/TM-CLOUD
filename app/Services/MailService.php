@@ -96,6 +96,22 @@ final class MailService
         return $this->sendOtp('system', $recipient, '123456', ['company_name' => 'TMPBase', 'purpose' => 'probar la configuración SMTP', 'expires_minutes' => 10]);
     }
 
+    public function notifyAdmin(string $subject, string $html): void
+    {
+        $recipient = strtolower(trim((string) ($this->config['admin_email'] ?? '')));
+        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            $this->logs->write('mail.admin_alert.skipped', null, 'mail', null, null, ['reason' => 'no admin email configured', 'subject' => $subject]);
+            return;
+        }
+        $text = trim(strip_tags($html));
+        try {
+            $messageId = $this->sendMessage($recipient, mb_substr($subject, 0, 180), $html, $text);
+            $this->logs->write('mail.admin_alert.sent', null, 'mail', null, null, ['recipient' => $recipient, 'subject' => $subject, 'message_id' => $messageId]);
+        } catch (\Throwable $e) {
+            $this->logs->write('mail.admin_alert.failed', null, 'mail', null, null, ['recipient' => $recipient, 'subject' => $subject, 'error' => substr($e->getMessage(), 0, 500)]);
+        }
+    }
+
     public function sendDocument(
         string $recipient,
         string $subject,

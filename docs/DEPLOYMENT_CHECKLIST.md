@@ -40,6 +40,7 @@ Este procedimiento evita publicar cambios de API, correo, portal o PDF sin valid
 - [ ] Subir código sin reemplazar `.env` ni `storage/`.
 - [ ] Ejecutar Composer y validar permisos de escritura del usuario PHP sobre `storage/`.
 - [ ] Iniciar un worker persistente con `php bin/mail-worker` mediante supervisor/cron o usar el contenedor preparado.
+- [ ] Programar `php bin/alerts-worker` cada pocos minutos (cron sugerido: `*/5 * * * *`) mediante supervisor/cron o usar el contenedor preparado.
 - [ ] Confirmar HTTPS, HSTS, CORS, cookies seguras y bloqueo HTTP de `.env`, `composer.json`, `app/` y `storage/`.
 - [ ] Ejecutar smoke tests de health, licencia, sync, portal, enlace PDF y correo.
 - [ ] Revisar logs por `request_id`, crecimiento de cola, respuestas 4xx/5xx y espacio libre.
