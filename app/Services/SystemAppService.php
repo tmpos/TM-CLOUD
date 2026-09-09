@@ -106,7 +106,7 @@ final class SystemAppService
             $zip->close();
             $zipOpen = false;
             $source = $this->findAppRoot($staging);
-            if (!rename($source, $target)) throw new RuntimeException('No se pudo publicar la carpeta del sistema.');
+            if (!$this->moveDirectory($source, $target)) throw new RuntimeException('No se pudo publicar la carpeta del sistema.');
             if (is_dir($staging)) $this->removeDirectory($staging);
             $metadata = json_encode([
                 'name' => $name,
@@ -170,11 +170,11 @@ final class SystemAppService
             $source = $this->findAppRoot($staging);
 
             if (is_dir($target)) {
-                if (!rename($target, $backup)) throw new RuntimeException('No se pudo retirar la version anterior.');
+                if (!$this->moveDirectory($target, $backup)) throw new RuntimeException('No se pudo retirar la version anterior.');
                 $backedUp = true;
             }
-            if (!rename($source, $target)) {
-                if ($backedUp) rename($backup, $target);
+            if (!$this->moveDirectory($source, $target)) {
+                if ($backedUp) $this->moveDirectory($backup, $target);
                 throw new RuntimeException('No se pudo publicar la nueva version.');
             }
             if (is_dir($staging)) $this->removeDirectory($staging);
@@ -182,7 +182,7 @@ final class SystemAppService
         } catch (\Throwable $e) {
             if ($zipOpen) $zip->close();
             if (is_dir($staging)) $this->removeDirectory($staging);
-            if ($backedUp && is_dir($backup) && !is_dir($target)) rename($backup, $target);
+            if ($backedUp && is_dir($backup) && !is_dir($target)) $this->moveDirectory($backup, $target);
             throw $e;
         }
     }
@@ -276,6 +276,34 @@ final class SystemAppService
         $items = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
         foreach ($items as $item) $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
         rmdir($directory);
+    }
+
+    /** rename() falla con "cross-device" cuando el origen todavia vive en una
+     * capa de solo lectura de la imagen Docker (overlayfs no permite mover esas
+     * carpetas directo). Se intenta rename() primero (rapido, mismo volumen) y
+     * si falla se cae a copiar recursivamente y borrar el origen.
+     */
+    private function moveDirectory(string $source, string $destination): bool
+    {
+        if (@rename($source, $destination)) return true;
+        if (!$this->copyDirectory($source, $destination)) return false;
+        $this->removeDirectory($source);
+        return true;
+    }
+
+    private function copyDirectory(string $source, string $destination): bool
+    {
+        if (!is_dir($destination) && !mkdir($destination, 0775, true) && !is_dir($destination)) return false;
+        $items = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($source, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST);
+        foreach ($items as $item) {
+            $target = $destination . DIRECTORY_SEPARATOR . $items->getSubPathName();
+            if ($item->isDir()) {
+                if (!is_dir($target) && !mkdir($target, 0775, true) && !is_dir($target)) return false;
+            } elseif (!copy($item->getPathname(), $target)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private function uploadError(int $error): string
