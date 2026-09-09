@@ -590,10 +590,33 @@ final class SystemRuntimeService
             $db->exec('ALTER TABLE accesorios ADD COLUMN valor_comision REAL DEFAULT 0');
         }
     }
-    private function table(PDO $db,string $name):string { Support::identifier($name,'table name');if(!$this->exists($db,$name))throw new RuntimeException('La tabla no existe.',404);return Support::quoteIdentifier($name); }
+    // Tablas como "colores" o "capacidad" existen en el SQLite local de cada
+    // instalacion de Electron (creadas ahi con CREATE TABLE IF NOT EXISTS)
+    // pero nunca se replicaron en el proyecto de la nube, asi que el
+    // navegador (que lee/escribe esta misma base via SystemRuntimeService)
+    // se encontraba con "La tabla no existe." en vez de una lista vacia. Se
+    // auto-crea con el esqueleto minimo (igual que Electron) en vez de
+    // fallar; cleanData() agrega las columnas que falten al insertar/editar,
+    // asi el mismo mecanismo cubre cualquier tabla nueva sin tener que
+    // arreglarlo componente por componente cada vez.
+    private function table(PDO $db,string $name):string {
+        Support::identifier($name,'table name');
+        if (!$this->exists($db,$name)) {
+            $db->exec('CREATE TABLE '.Support::quoteIdentifier($name).' (id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT UNIQUE, created_at TEXT, updated_at TEXT)');
+        }
+        return Support::quoteIdentifier($name);
+    }
     private function exists(PDO $db,string $name):bool { $stmt=$db->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?");$stmt->execute([$name]);return(bool)$stmt->fetchColumn(); }
     private function columns(PDO $db,string $table):array { return array_column($db->query('PRAGMA table_info('.Support::quoteIdentifier($table).')')->fetchAll(),'name'); }
     private function hasColumn(PDO $db,string $table,string $column):bool { return in_array($column,$this->columns($db,$table),true); }
-    private function cleanData(PDO $db,string $table,array $data,bool $insert):array { $allowed=$this->columns($db,$table);foreach(array_keys($data)as$key){if(!in_array($key,$allowed,true)||(!$insert&&$key==='id'))unset($data[$key]);elseif(is_array($data[$key])||is_object($data[$key]))$data[$key]=json_encode($data[$key],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);}unset($data['id']);return$data; }
+    private function ensureColumnsForData(PDO $db,string $table,array $data):void {
+        $existing=$this->columns($db,$table);
+        foreach($data as $key=>$value){
+            if($key==='id'||in_array($key,$existing,true)||!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/',(string)$key))continue;
+            $type=is_int($value)?'INTEGER':(is_float($value)?'REAL':'TEXT');
+            try{$db->exec('ALTER TABLE '.Support::quoteIdentifier($table).' ADD COLUMN '.Support::quoteIdentifier((string)$key)." $type");}catch(\Throwable){}
+        }
+    }
+    private function cleanData(PDO $db,string $table,array $data,bool $insert):array { $this->ensureColumnsForData($db,$table,$data);$allowed=$this->columns($db,$table);foreach(array_keys($data)as$key){if(!in_array($key,$allowed,true)||(!$insert&&$key==='id'))unset($data[$key]);elseif(is_array($data[$key])||is_object($data[$key]))$data[$key]=json_encode($data[$key],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);}unset($data['id']);return$data; }
     private function row(PDO $db,string $table,int $id):array { $stmt=$db->prepare("SELECT * FROM $table WHERE id=? LIMIT 1");$stmt->execute([$id]);return$stmt->fetch()?:throw new RuntimeException('Registro no encontrado.',404); }
 }
