@@ -175,6 +175,15 @@ final class SystemRuntimeService
         if ($channel === 'transferencia:realizar') return $this->transferir($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'ajuste:realizar') return $this->ajustar($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'precio:registrarHistorial') return $this->registrarPrecios($db, $project, (array) ($args[0] ?? []));
+        if ($channel === 'otp-local:getConfig') return $this->otpStatus($db);
+        if ($channel === 'otp-local:saveConfig') return $this->saveOtpConfig($db, (array) ($args[0] ?? []));
+        if (in_array($channel, ['facturas:solicitarOtpEliminar', 'telefonos:solicitarOtpEliminar'], true)) return $this->otpStatus($db);
+        if (in_array($channel, ['facturas:confirmarOtpEliminar', 'telefonos:confirmarOtpEliminar'], true)) {
+            $codigo = (string) (($args[0] ?? [])['codigo'] ?? '');
+            return $this->validateOtp($db, $codigo)
+                ? ['success' => true]
+                : ['success' => false, 'error' => 'Codigo OTP invalido o expirado.'];
+        }
         if ($channel === 'auditoria:registrar') { $payload = (array) ($args[0] ?? []); $this->audit($db, (string) ($payload['tabla'] ?? 'sistema'), (int) ($payload['registro_id'] ?? 0), (string) ($payload['accion'] ?? 'ACTION'), $actor, $payload['datos_nuevos'] ?? null, $payload['datos_anteriores'] ?? null); return ['success' => true]; }
         if ($channel === 'app:getName') return 'TMPOS Web';
         if ($channel === 'app:getVersion') return '2.13.3-web';
@@ -368,6 +377,103 @@ final class SystemRuntimeService
     private function changeBank(PDO $db,int $id,string $uid,float $delta):void { $bank=$this->bank($db,$id,$uid);if(!$bank)throw new RuntimeException('No se encontro el banco asociado.');$db->prepare('UPDATE bancos SET saldo=?,fecha_transaccion=?,updated_at=? WHERE id=?')->execute([(float)$bank['saldo']+$delta,gmdate('Y-m-d H:i:s'),gmdate('Y-m-d H:i:s'),(int)$bank['id']]); }
 
     private function registrarPrecios(PDO $db,array $project,array $p):array { foreach((array)($p['cambios']??[])as$change)if((string)($change['anterior']??'')!==(string)($change['nuevo']??''))$this->insertRaw($db,$project,'historial_precios',['tabla'=>$p['tabla']??'','producto_id'=>$p['producto_id']??0,'producto_nombre'=>$p['producto_nombre']??'','campo'=>$change['campo']??'','valor_anterior'=>$change['anterior']??'','valor_nuevo'=>$change['nuevo']??'','usuario'=>'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true]; }
+
+    /** El OTP Local es un TOTP casero (HMAC-SHA256 de un secreto contra una
+     * ventana de tiempo) que Electron ya calculaba localmente con un secreto
+     * distinto por dispositivo, por lo que nunca podia coincidir entre
+     * equipos. Aqui se replica el mismo algoritmo byte a byte (ver
+     * electron/main.ts calculateVariableOtp/validateLocalOtp) pero contra un
+     * secreto compartido guardado en una sola fila de la tabla otp_config del
+     * propio proyecto, para que el navegador calcule el mismo codigo que
+     * Electron sin depender de que el WebSocket este vivo en ese instante.
+     */
+    private const OTP_CONFIG_UID = 'proyecto-otp-config';
+
+    private function ensureOtpConfigTable(PDO $db): void
+    {
+        if ($this->exists($db, 'otp_config')) return;
+        $db->exec('CREATE TABLE otp_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            uid TEXT UNIQUE NOT NULL,
+            mode TEXT NOT NULL DEFAULT \'variable\',
+            fixed_code TEXT NOT NULL DEFAULT \'0000\',
+            interval_seconds INTEGER NOT NULL DEFAULT 60,
+            send_email INTEGER NOT NULL DEFAULT 0,
+            secret TEXT NOT NULL DEFAULT \'\',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )');
+    }
+
+    private function otpConfigRow(PDO $db): array
+    {
+        $this->ensureOtpConfigTable($db);
+        $stmt = $db->prepare('SELECT * FROM otp_config WHERE uid = ? LIMIT 1');
+        $stmt->execute([self::OTP_CONFIG_UID]);
+        $row = $stmt->fetch();
+        $now = gmdate('Y-m-d H:i:s');
+        if (!$row) {
+            $secret = bin2hex(random_bytes(32));
+            $db->prepare('INSERT INTO otp_config (uid, mode, fixed_code, interval_seconds, send_email, secret, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
+                ->execute([self::OTP_CONFIG_UID, 'variable', '0000', 60, 0, $secret, $now, $now]);
+            $stmt->execute([self::OTP_CONFIG_UID]);
+            $row = $stmt->fetch();
+        } elseif (empty($row['secret'])) {
+            $secret = bin2hex(random_bytes(32));
+            $db->prepare('UPDATE otp_config SET secret = ?, updated_at = ? WHERE uid = ?')->execute([$secret, $now, self::OTP_CONFIG_UID]);
+            $row['secret'] = $secret;
+        }
+        return $row;
+    }
+
+    private function calculateVariableOtp(string $secret, int $intervalSeconds, ?int $timestampMs = null): string
+    {
+        $timestampMs ??= (int) round(microtime(true) * 1000);
+        $windowNumber = (int) floor($timestampMs / 1000 / $intervalSeconds);
+        $digest = hash_hmac('sha256', (string) $windowNumber, $secret, true);
+        $num = unpack('N', substr($digest, 0, 4))[1];
+        return str_pad((string) ($num % 10000), 4, '0', STR_PAD_LEFT);
+    }
+
+    private function otpStatus(PDO $db): array
+    {
+        $row = $this->otpConfigRow($db);
+        $mode = $row['mode'] === 'fixed' ? 'fixed' : 'variable';
+        $intervalSeconds = max(30, min(3600, (int) $row['interval_seconds']));
+        $fixedCode = preg_match('/^\d{4}$/', (string) $row['fixed_code']) ? (string) $row['fixed_code'] : '0000';
+        $code = $mode === 'fixed' ? $fixedCode : $this->calculateVariableOtp((string) $row['secret'], $intervalSeconds);
+        $nowSeconds = (int) floor(microtime(true));
+        $secondsRemaining = $mode === 'fixed' ? 0 : $intervalSeconds - ($nowSeconds % $intervalSeconds);
+        return ['success' => true, 'data' => [
+            'mode' => $mode, 'fixedCode' => $fixedCode, 'intervalSeconds' => $intervalSeconds,
+            'sendEmail' => (bool) $row['send_email'], 'code' => $code,
+            'secondsRemaining' => $secondsRemaining, 'networkUrl' => '',
+        ]];
+    }
+
+    private function saveOtpConfig(PDO $db, array $data): array
+    {
+        $row = $this->otpConfigRow($db);
+        $mode = ($data['mode'] ?? '') === 'fixed' ? 'fixed' : 'variable';
+        $fixedCode = preg_match('/^\d{4}$/', (string) ($data['fixedCode'] ?? '')) ? (string) $data['fixedCode'] : (string) $row['fixed_code'];
+        $intervalSeconds = max(30, min(3600, (int) ($data['intervalSeconds'] ?? $row['interval_seconds'])));
+        $sendEmail = !empty($data['sendEmail']) ? 1 : 0;
+        $secret = !empty($data['regenerateSecret']) ? bin2hex(random_bytes(32)) : (string) $row['secret'];
+        $db->prepare('UPDATE otp_config SET mode=?, fixed_code=?, interval_seconds=?, send_email=?, secret=?, updated_at=? WHERE uid=?')
+            ->execute([$mode, $fixedCode, $intervalSeconds, $sendEmail, $secret, gmdate('Y-m-d H:i:s'), self::OTP_CONFIG_UID]);
+        return $this->otpStatus($db);
+    }
+
+    private function validateOtp(PDO $db, string $code): bool
+    {
+        $row = $this->otpConfigRow($db);
+        if ($row['mode'] === 'fixed') return $code === (string) $row['fixed_code'];
+        $intervalSeconds = max(30, min(3600, (int) $row['interval_seconds']));
+        $nowMs = (int) round(microtime(true) * 1000);
+        $current = $this->calculateVariableOtp((string) $row['secret'], $intervalSeconds, $nowMs);
+        $previous = $this->calculateVariableOtp((string) $row['secret'], $intervalSeconds, $nowMs - $intervalSeconds * 1000);
+        return $code === $current || $code === $previous;
+    }
 
     private function transferir(PDO $db, array $project, array $p): array
     {
