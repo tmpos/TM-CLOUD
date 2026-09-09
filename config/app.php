@@ -37,7 +37,6 @@ return [
     'realtime' => [
         'enabled' => filter_var(getenv('REALTIME_ENABLED') ?: true, FILTER_VALIDATE_BOOL),
         'ws_url' => getenv('REALTIME_WS_URL') ?: 'ws://127.0.0.1:8080',
-        'server_host' => getenv('REALTIME_SERVER_HOST') ?: '127.0.0.1',
         'ws_port' => (int) (getenv('REALTIME_WS_PORT') ?: 8080),
         'event_port' => (int) (getenv('REALTIME_EVENT_PORT') ?: 8081),
     ],

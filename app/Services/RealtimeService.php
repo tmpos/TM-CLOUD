@@ -6,14 +6,12 @@ namespace App\Services;
 
 final class RealtimeService
 {
-    private string $host;
     private int $port;
     private bool $enabled;
 
     public function __construct(array $config)
     {
         $this->enabled = (bool) ($config['enabled'] ?? true);
-        $this->host = (string) ($config['server_host'] ?? '127.0.0.1');
         $this->port = (int) ($config['event_port'] ?? 8081);
     }
 
@@ -22,7 +20,14 @@ final class RealtimeService
         if (!$this->enabled) return;
 
         try {
-            $socket = @fsockopen('tcp://' . $this->host, $this->port, $errno, $errstr, 1);
+            // El servidor de realtime siempre corre en el mismo contenedor y
+            // escucha en 0.0.0.0 (todas las interfaces) para aceptar conexiones;
+            // eso no significa que se pueda usar 0.0.0.0 como destino al
+            // conectar como cliente. Este handoff es siempre local, por eso
+            // se usa 127.0.0.1 sin depender de config/env (una config de
+            // "server_host" incorrecta en el entorno rompia esta conexion en
+            // silencio: la escritura quedaba guardada pero el evento nunca salia).
+            $socket = @fsockopen('tcp://127.0.0.1', $this->port, $errno, $errstr, 1);
             if (!$socket) return;
 
             $payload = json_encode([
