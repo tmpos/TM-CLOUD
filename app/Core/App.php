@@ -75,7 +75,7 @@ final class App
         $storefronts = new StorefrontService($db, $config, $projects, $schema, $records);
         $credentialCipher = new CredentialCipher($config['storage']);
         $storefrontCommerce = new StorefrontCommerceService($db, $config, $credentialCipher, $storefronts, $logs);
-        $storefrontInventory = new StorefrontInventoryService($projects, $schema, $logs);
+        $storefrontInventory = new StorefrontInventoryService($projects, $schema, $logs, $webhooks);
         $storefrontAdmins = new StorefrontAdminService($db, $storefronts, $storefrontInventory, $logs);
         $portalAuth = new PortalAuth($db);
         $systemRuntime = new SystemRuntimeService($schema, $logs, $sharedDocuments, $webhooks);

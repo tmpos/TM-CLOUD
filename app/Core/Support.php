@@ -20,7 +20,7 @@ final class Support
 
     public static function now(): string
     {
-        return gmdate('Y-m-d H:i:s');
+        return gmdate('Y-m-d\TH:i:s\Z');
     }
 
     public static function identifier(string $value, string $label = 'identifier'): string

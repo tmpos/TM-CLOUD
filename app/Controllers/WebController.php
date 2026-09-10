@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Core\Auth;
 use App\Core\Csrf;
 use App\Core\Http;
+use App\Core\Support;
 use App\Core\View;
 use App\Services\BackupService;
 use App\Services\ImportExportService;
@@ -869,7 +870,7 @@ final class WebController
         $from = (string) ($_GET['from'] ?? '');
         $to = $_GET['to'] ?? null;
         $data = $this->records->modified($project, $table, $from, $to);
-        Flight::json(['data' => $data, 'server_time' => date('Y-m-d H:i:s')]);
+        Flight::json(['data' => $data, 'server_time' => Support::now()]);
     }
 
     private function importTablesPage(string $uid): void

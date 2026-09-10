@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Http;
+use App\Core\Support;
 use App\Services\ApiKeyService;
 use App\Services\BackupService;
 use App\Services\ImportExportService;
@@ -335,7 +336,7 @@ final class ApiController
             }
             Flight::json([
                 'changes' => $changes,
-                'server_time' => date('Y-m-d H:i:s'),
+                'server_time' => Support::now(),
             ]);
         }));
         Flight::route('GET /api/@project/health', fn ($project) => $this->runProject($project, false, function ($p): void {

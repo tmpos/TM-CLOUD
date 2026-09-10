@@ -17,7 +17,38 @@ final class StorefrontInventoryService
         private ProjectService $projects,
         private SchemaService $schema,
         private LogService $logs,
+        private WebhookService $webhooks,
     ) {
+    }
+
+    private function notifyMovements(array $project, PDO $db, array $movements): void
+    {
+        $notified = [];
+        foreach ($movements as $movement) {
+            $table = (string) ($movement['table_name'] ?? '');
+            $keyColumn = (string) ($movement['key_column'] ?? 'uid');
+            $rowKey = $movement['row_key'] ?? null;
+            if ($table === '' || $rowKey === null) {
+                continue;
+            }
+            $dedupeKey = $table . '|' . $rowKey;
+            if (isset($notified[$dedupeKey])) {
+                continue;
+            }
+            $notified[$dedupeKey] = true;
+            try {
+                $stmt = $db->prepare(
+                    'SELECT * FROM ' . Support::quoteIdentifier(Support::identifier($table, 'table name'))
+                    . ' WHERE ' . Support::quoteIdentifier(Support::identifier($keyColumn, 'column name')) . '=? LIMIT 1'
+                );
+                $stmt->execute([$rowKey]);
+                $row = $stmt->fetch();
+                if ($row) {
+                    $this->webhooks->dispatch('record.updated', $project, $table, $row);
+                }
+            } catch (\Throwable) {
+            }
+        }
     }
 
     public function commit(array $store, array $order, array $items, bool $requireExplicitImei = false): array
@@ -74,6 +105,8 @@ final class StorefrontInventoryService
             throw $e;
         }
 
+        $this->notifyMovements($project, $db, $movements);
+
         try {
             $this->logs->write(
                 'storefront.inventory.committed',
@@ -119,16 +152,17 @@ final class StorefrontInventoryService
                     $table = Support::identifier((string) $movement['table_name'], 'table name');
                     $stockColumn = Support::identifier((string) $movement['stock_column'], 'column name');
                     $keyColumn = Support::identifier((string) ($movement['key_column'] ?? 'uid'), 'column name');
+                    $touchUpdatedAt = in_array('updated_at', $this->columns($db, $table), true);
                     $stmt = $db->prepare(
                         'UPDATE ' . Support::quoteIdentifier($table)
                         . ' SET ' . Support::quoteIdentifier($stockColumn)
                         . '=COALESCE(CAST(' . Support::quoteIdentifier($stockColumn) . ' AS REAL),0)+?'
+                        . ($touchUpdatedAt ? ', "updated_at"=?' : '')
                         . ' WHERE ' . Support::quoteIdentifier($keyColumn) . '=?'
                     );
-                    $stmt->execute([
-                        abs((float) ($movement['quantity'] ?? 0)),
-                        $movement['row_key'] ?? '',
-                    ]);
+                    $stmt->execute($touchUpdatedAt
+                        ? [abs((float) ($movement['quantity'] ?? 0)), Support::now(), $movement['row_key'] ?? '']
+                        : [abs((float) ($movement['quantity'] ?? 0)), $movement['row_key'] ?? '']);
                 }
             }
             $db->commit();
@@ -138,6 +172,8 @@ final class StorefrontInventoryService
             }
             throw $e;
         }
+
+        $this->notifyMovements($project, $db, $movements);
 
         try {
             $this->logs->write(
@@ -291,13 +327,17 @@ final class StorefrontInventoryService
         if ((float) $before < $quantity) {
             throw new InvalidArgumentException('Existencia insuficiente para ' . $productName . '.');
         }
+        $touchUpdatedAt = in_array('updated_at', $columns, true);
         $update = $db->prepare(
             'UPDATE ' . Support::quoteIdentifier($table)
             . ' SET ' . Support::quoteIdentifier($stockColumn)
             . '=CAST(' . Support::quoteIdentifier($stockColumn) . ' AS REAL)-?'
+            . ($touchUpdatedAt ? ', "updated_at"=?' : '')
             . ' WHERE uid=? AND CAST(' . Support::quoteIdentifier($stockColumn) . ' AS REAL)>=?'
         );
-        $update->execute([$quantity, $productUid, $quantity]);
+        $update->execute($touchUpdatedAt
+            ? [$quantity, Support::now(), $productUid, $quantity]
+            : [$quantity, $productUid, $quantity]);
         if ($update->rowCount() !== 1) {
             throw new RuntimeException('El inventario cambió durante la venta. Actualiza e intenta nuevamente.');
         }
