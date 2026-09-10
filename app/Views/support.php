@@ -57,6 +57,7 @@
     let socket = null;
     let clientId = null;
     let stations = {};
+    let pingTimer = null;
     // Session state for the station currently targeted (request pending or active).
     let session = null; // { deviceId, deviceName, sessionId, pc, dataChannel }
 
@@ -94,6 +95,16 @@
         socket = new WebSocket(body.data.ws_url);
         socket.addEventListener('open', () => {
             socket.send(JSON.stringify({ type: 'subscribe', project: projectUid, token, role: 'admin' }));
+            // Cloudflare (y la mayoria de proxies delante de un WebSocket) cierra
+            // conexiones inactivas despues de ~100s sin trafico. La estacion ya
+            // envia un ping cada 20s y por eso se mantiene conectada; este panel
+            // no lo hacia, asi que el socket se caia solo cada par de minutos y
+            // se reconectaba en loop (perdiendo cualquier solicitud de soporte
+            // que coincidiera con ese instante).
+            if (pingTimer) clearInterval(pingTimer);
+            pingTimer = setInterval(() => {
+                if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'ping' }));
+            }, 20000);
         });
         socket.addEventListener('message', (event) => {
             let payload;
@@ -101,6 +112,8 @@
             handleMessage(payload);
         });
         socket.addEventListener('close', () => {
+            if (pingTimer) clearInterval(pingTimer);
+            pingTimer = null;
             els.badge.textContent = 'Desconectado';
             els.badge.className = 'rounded-full bg-slate-500/15 px-2.5 py-1 text-xs font-semibold text-slate-400';
             stations = {}; renderStations();
