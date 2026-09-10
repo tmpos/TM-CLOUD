@@ -109,6 +109,13 @@ CREATE TABLE IF NOT EXISTS _support_tokens (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_support_tokens_lookup ON _support_tokens(uid, project_uid, used_at, expires_at);
+CREATE TABLE IF NOT EXISTS _station_labels (
+    project_uid TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_uid, device_id)
+);
 CREATE TABLE IF NOT EXISTS webhooks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     uid TEXT UNIQUE NOT NULL,

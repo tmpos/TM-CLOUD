@@ -456,6 +456,12 @@ final class WebController
             $issued = $this->support->issueToken($uid, (string) (Auth::user()['uid'] ?? ''));
             Flight::json(['data' => $issued]);
         }));
+        Flight::route('POST /projects/@uid/support/stations/@deviceId/label', fn (string $uid, string $deviceId) => $this->action(function (array $input) use ($uid, $deviceId): void {
+            $this->projects->findActive($uid);
+            $label = trim((string) ($input['label'] ?? ''));
+            $this->support->setLabel($uid, $deviceId, $label);
+            Flight::json(['data' => ['device_id' => $deviceId, 'label' => $label]]);
+        }));
         Flight::route('POST /projects/@uid/backups/@backup/restore', fn (string $uid, string $backup) => $this->action(function () use ($uid, $backup): void {
             $this->backups->restore($this->projects->find($uid), $backup);
             Http::flash('success', 'Backup restored. A safety backup was created first.');

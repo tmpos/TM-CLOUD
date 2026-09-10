@@ -158,12 +158,28 @@ final class RealtimeServer implements MessageComponentInterface
         }
     }
 
+    /** Un admin puede renombrar una estacion desde el panel (tabla
+     * _station_labels); esa etiqueta manda sobre el nombre que la propia
+     * estacion reporta, para poder distinguirlas aunque el operador de la
+     * tienda nunca haya configurado un nombre localmente. */
+    private function labelFor(string $projectUid, string $deviceId): ?string
+    {
+        try {
+            $stmt = $this->db()->prepare('SELECT label FROM _station_labels WHERE project_uid = ? AND device_id = ?');
+            $stmt->execute([$projectUid, $deviceId]);
+            $row = $stmt->fetch();
+            return $row ? (string) $row['label'] : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     private function stationsSnapshot(string $projectUid): array
     {
         $stations = [];
         foreach ($this->projectDevices[$projectUid] ?? [] as $deviceId => $connId) {
             $meta = $this->connectionMeta[$connId] ?? null;
-            if ($meta) $stations[] = ['device_id' => $deviceId, 'device_name' => $meta['device_name']];
+            if ($meta) $stations[] = ['device_id' => $deviceId, 'device_name' => $this->labelFor($projectUid, $deviceId) ?? $meta['device_name']];
         }
         return $stations;
     }
@@ -171,7 +187,8 @@ final class RealtimeServer implements MessageComponentInterface
     private function broadcastPresence(string $projectUid, string $action, string $deviceId, ?string $deviceName): void
     {
         if (!isset($this->projects[$projectUid])) return;
-        $payload = json_encode(['type' => 'presence', 'action' => $action, 'device_id' => $deviceId, 'device_name' => $deviceName]);
+        $displayName = $this->labelFor($projectUid, $deviceId) ?? $deviceName;
+        $payload = json_encode(['type' => 'presence', 'action' => $action, 'device_id' => $deviceId, 'device_name' => $displayName]);
         foreach ($this->projects[$projectUid] as $connId => $conn) {
             $meta = $this->connectionMeta[$connId] ?? null;
             if ($meta && $meta['role'] === 'admin') $conn->send($payload);

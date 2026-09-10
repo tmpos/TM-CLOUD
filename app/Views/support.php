@@ -67,6 +67,24 @@
         });
     }
 
+    async function renameStation(deviceId, currentName) {
+        const nuevo = window.prompt('Nombre para esta estacion (ej. Caja 1, PC Recepcion):', currentName || '');
+        if (nuevo === null) return;
+        try {
+            const res = await fetch('/projects/' + projectUid + '/support/stations/' + encodeURIComponent(deviceId) + '/label', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: JSON.stringify({ label: nuevo.trim() }),
+            });
+            if (!res.ok) throw new Error('request failed');
+            const body = await res.json();
+            stations[deviceId] = body.data.label || deviceId;
+            renderStations();
+        } catch (e) {
+            window.alert('No se pudo guardar el nombre de la estacion.');
+        }
+    }
+
     function renderStations() {
         const ids = Object.keys(stations);
         els.empty.classList.toggle('hidden', ids.length > 0);
@@ -74,14 +92,23 @@
         ids.forEach((deviceId) => {
             const row = document.createElement('div');
             row.setAttribute('data-station-row', '');
-            row.className = 'flex items-center justify-between p-4';
-            row.innerHTML = '<span class="text-sm text-slate-200"></span>';
+            row.className = 'flex items-center justify-between gap-2 p-4';
+            row.innerHTML = '<span class="min-w-0 flex-1 truncate text-sm text-slate-200"></span>';
             row.querySelector('span').textContent = stations[deviceId] || deviceId;
+            const actions = document.createElement('div');
+            actions.className = 'flex items-center gap-1.5 shrink-0';
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'btn-secondary text-xs px-2 py-1.5';
+            renameBtn.title = 'Renombrar estacion';
+            renameBtn.textContent = '✎';
+            renameBtn.addEventListener('click', () => renameStation(deviceId, stations[deviceId] || ''));
+            actions.appendChild(renameBtn);
             const btn = document.createElement('button');
             btn.className = 'btn-secondary text-xs px-2 py-1.5';
             btn.textContent = 'Conectar';
             btn.addEventListener('click', () => requestSession(deviceId, stations[deviceId] || deviceId));
-            row.appendChild(btn);
+            actions.appendChild(btn);
+            row.appendChild(actions);
             els.list.appendChild(row);
         });
     }
