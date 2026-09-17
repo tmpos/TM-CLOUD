@@ -1,0 +1,1 @@
+var e=[`E31`,`E32`,`E45`];function t(e){return String(e||``).trim().toUpperCase()}function n(n){return e.includes(t(n))}function r(e){let n=t(e);return n===`E31`?`fiscal-invoices`:n===`E32`?`invoices`:n===`E45`?`gubernamentals`:null}function i(e){let n=t(e);return n===`E31`||n===`E45`}export{i,n,t as r,r as t};
