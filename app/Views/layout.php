@@ -21,6 +21,8 @@ $flashes = $flashes ?? [];
     <link rel="stylesheet" href="/assets/css/app.css">
 </head>
 <body class="min-h-screen bg-ink text-slate-200 antialiased">
+<div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#ff2d55;color:#fff;text-align:center;padding:6px;font:700 13px system-ui;letter-spacing:.03em">MARCADOR DE VERSION &mdash; <?= e(gmdate('Y-m-d H:i:s')) ?> UTC &mdash; build 7f395d9-debug</div>
+<div style="height:28px"></div>
 <?php if ($authenticated): ?>
 <div class="min-h-screen lg:flex">
     <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-line bg-[#0c1218] lg:block">
