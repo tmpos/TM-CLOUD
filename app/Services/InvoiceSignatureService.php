@@ -63,11 +63,12 @@ final class InvoiceSignatureService
         return $request;
     }
 
-    public function sign(array $request, array $project, array $invoice, array $input): array
+    public function sign(array $request, array $project, array $invoice, array $input, bool $useStoredSnapshot = false): array
     {
         self::ensureSignable($invoice);
         if ($request['signed_at'] !== null) throw new RuntimeException('Esta factura ya fue firmada.', 409);
-        if (!hash_equals((string) $request['invoice_hash'], hash('sha256', $this->snapshot($project, $invoice)))) {
+        $snapshot = $useStoredSnapshot ? (string) ($request['invoice_snapshot'] ?? '') : $this->snapshot($project, $invoice);
+        if (!hash_equals((string) $request['invoice_hash'], hash('sha256', $snapshot))) {
             throw new RuntimeException('La factura cambió desde que se generó el enlace. Solicite uno nuevo.', 409);
         }
         if (!in_array($input['consent'] ?? null, [true, 'true', '1', 1, 'on'], true)) throw new InvalidArgumentException('Debe aceptar expresamente la firma de la factura.');
@@ -141,6 +142,20 @@ final class InvoiceSignatureService
             'consent' => self::CONSENT,
         ];
         return json_encode(self::canonicalize($document), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
+    public function invoiceFromSnapshot(array $request): array
+    {
+        $snapshot = (string) ($request['invoice_snapshot'] ?? '');
+        if ($snapshot === '' || !hash_equals((string) ($request['invoice_hash'] ?? ''), hash('sha256', $snapshot))) {
+            throw new RuntimeException('La copia de la factura no es valida.', 409);
+        }
+        $document = json_decode($snapshot, true, 64, JSON_THROW_ON_ERROR);
+        $invoice = $document['invoice'] ?? null;
+        if (!is_array($invoice) || trim((string) ($invoice['uid'] ?? '')) !== trim((string) ($request['record_uid'] ?? ''))) {
+            throw new RuntimeException('La copia de la factura no es valida.', 409);
+        }
+        return $invoice;
     }
 
     private function rows(array $project, string $table, ?string $column, array $values): array

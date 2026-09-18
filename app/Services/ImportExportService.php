@@ -25,12 +25,12 @@ final class ImportExportService
         $stream = fopen('php://temp', 'r+');
         fwrite($stream, $content);
         rewind($stream);
-        $headers = fgetcsv($stream);
+        $headers = fgetcsv($stream, escape: '\\');
         if (!$headers) {
             return [];
         }
         $rows = [];
-        while (($values = fgetcsv($stream)) !== false) {
+        while (($values = fgetcsv($stream, escape: '\\')) !== false) {
             if (count($values) !== count($headers)) {
                 throw new \InvalidArgumentException('A CSV row has a different number of columns than its header.');
             }
@@ -50,9 +50,9 @@ final class ImportExportService
         }
         $stream = fopen('php://temp', 'r+');
         if ($rows) {
-            fputcsv($stream, array_keys($rows[0]));
+            fputcsv($stream, array_keys($rows[0]), escape: '\\');
             foreach ($rows as $row) {
-                fputcsv($stream, $row);
+                fputcsv($stream, $row, escape: '\\');
             }
         }
         rewind($stream);

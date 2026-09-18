@@ -48,6 +48,23 @@ final class LogService
         return $sanitized;
     }
 
+    /** Cuenta cuantos 'record.deleted' se registraron para esta tabla en los
+     * ultimos $seconds segundos. Sirve de circuit breaker: un usuario borrando
+     * a mano nunca llega a decenas de borrados en un par de minutos: un bucle
+     * de sincronizacion con un bug si. Ver uso en ApiController (DELETE por
+     * registro) para bloquear un borrado masivo antes de que avance.
+     */
+    public function countRecentDeletes(string $projectUid, string $table, int $seconds): int
+    {
+        $since = gmdate('Y-m-d\TH:i:s\Z', time() - $seconds);
+        $stmt = $this->db->prepare(
+            'SELECT COUNT(*) FROM project_logs
+             WHERE project_uid = ? AND action = ? AND table_name = ? AND created_at >= ?'
+        );
+        $stmt->execute([$projectUid, 'record.deleted', $table, $since]);
+        return (int) $stmt->fetchColumn();
+    }
+
     public function wasDeleted(string $projectUid, string $table, string $recordUid): bool
     {
         $stmt = $this->db->prepare(

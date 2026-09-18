@@ -74,13 +74,25 @@ final class RecordService
         return $stmt->fetch() ?: throw new RuntimeException('Record not found.');
     }
 
-    public function all(array $project, string $table): array
+    public function all(array $project, string $table, ?string $from = null, ?string $to = null): array
     {
         $table = Support::identifier($table, 'table name');
         $this->schema->columns($project, $table);
-        return $this->schema->connection($project)
-            ->query('SELECT * FROM ' . Support::quoteIdentifier($table) . ' ORDER BY id ASC')
-            ->fetchAll();
+        $where = [];
+        $params = [];
+        if ($from !== null && $from !== '') {
+            $where[] = 'created_at >= ?';
+            $params[] = $from;
+        }
+        if ($to !== null && $to !== '') {
+            $where[] = 'created_at <= ?';
+            $params[] = $to;
+        }
+        $whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        $stmt = $this->schema->connection($project)
+            ->prepare('SELECT * FROM ' . Support::quoteIdentifier($table) . $whereSql . ' ORDER BY id ASC');
+        $stmt->execute($params);
+        return $stmt->fetchAll();
     }
 
     /**

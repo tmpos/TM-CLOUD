@@ -930,7 +930,14 @@ final class WebController
     {
         $project = $this->projects->find($uid);
         $format = ($_GET['format'] ?? 'json') === 'csv' ? 'csv' : 'json';
-        $rows = $this->records->all($project, $table);
+        $from = trim((string) ($_GET['from'] ?? ''));
+        $to = trim((string) ($_GET['to'] ?? ''));
+        $rows = $this->records->all(
+            $project,
+            $table,
+            $from !== '' ? $from . ' 00:00:00' : null,
+            $to !== '' ? $to . ' 23:59:59' : null
+        );
         header('Content-Type: ' . ($format === 'csv' ? 'text/csv' : 'application/json'));
         header('Content-Disposition: attachment; filename="' . $table . '.' . $format . '"');
         echo $this->transfer->export($rows, $format);

@@ -509,7 +509,9 @@ final class ApiController
         }));
         Flight::route('GET /api/@project/@table/export', fn ($project, $table) => $this->run($project, $table, function ($p) use ($table): void {
             $format = ($_GET['format'] ?? 'json') === 'csv' ? 'csv' : 'json';
-            $rows = $this->records->all($p, $table);
+            $from = trim((string) ($_GET['from'] ?? ''));
+            $to = trim((string) ($_GET['to'] ?? ''));
+            $rows = $this->records->all($p, $table, $from !== '' ? $from : null, $to !== '' ? $to : null);
             header('Content-Type: ' . ($format === 'csv' ? 'text/csv' : 'application/json'));
             header("Content-Disposition: attachment; filename=\"$table.$format\"");
             echo $this->transfer->export($rows, $format);
@@ -562,6 +564,18 @@ final class ApiController
             Flight::json(['data' => $record]);
         }));
         Flight::route('DELETE /api/@project/@table/@uid', fn ($project, $table, $uid) => $this->run($project, $table, function ($p) use ($table, $uid): void {
+            // Circuit breaker: si algo (un bug de sincronizacion, un cliente
+            // desconfigurado) ya borro muchos registros de esta tabla en muy
+            // poco tiempo, se bloquea el resto en vez de seguir destruyendo
+            // datos. Un humano borrando a mano nunca llega a este volumen.
+            $recientes = $this->logs->countRecentDeletes($p['uid'], $table, 120);
+            if ($recientes >= 50) {
+                throw new \RuntimeException(
+                    "Borrados bloqueados: se detectaron $recientes registros de \"$table\" eliminados en los ultimos 2 minutos. "
+                    . 'Esto parece un bucle o error de sincronizacion, no una accion manual. Contacta soporte antes de seguir.',
+                    429
+                );
+            }
             $record = $this->records->find($p, $table, $uid);
             $this->records->delete($p, $table, $uid);
             $imagesDeleted = $this->storage->deleteImagesFromRowsIfUnreferenced($p, [$record]);
@@ -699,7 +713,16 @@ final class ApiController
         if ($license['status'] !== 'active' || ($license['expires_at'] && $license['expires_at'] < date('Y-m-d H:i:s'))) throw new \RuntimeException('License is not active.', 403);
         if (!$this->licenses->isDeviceAuthorized($license['uid'], $deviceId)) throw new \RuntimeException('Device is not authorized.', 403);
         $project = $this->projects->findActive($license['project_uid']);
-        return [$project, $this->records->find($project, 'facturas', $recordUid)];
+        try {
+            $invoice = $this->records->find($project, 'facturas', $recordUid);
+        } catch (\Throwable $e) {
+            $invoice = $input['invoice'] ?? null;
+            if (!is_array($invoice)) throw new \RuntimeException('La factura no existe o aun no esta sincronizada.', 404, $e);
+            if (trim((string) ($invoice['uid'] ?? '')) !== $recordUid) throw new \InvalidArgumentException('El UID de la factura no coincide.');
+            $encoded = json_encode($invoice, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if ($encoded === false || strlen($encoded) > 524288) throw new \InvalidArgumentException('La factura excede el tamano permitido.');
+        }
+        return [$project, $invoice];
     }
 
     private function signingDocument(string $token): array
@@ -707,11 +730,18 @@ final class ApiController
         $this->keys->rateLimitPublic('sign-invoice:' . hash('sha256', $token), 30);
         $request = $this->signatures->resolve($token);
         $project = $this->projects->findActive((string) $request['project_uid']);
-        $invoice = $this->records->find($project, 'facturas', (string) $request['record_uid']);
-        if (!hash_equals((string) $request['invoice_hash'], hash('sha256', $this->signatures->snapshot($project, $invoice)))) {
+        $storedSnapshot = false;
+        try {
+            $invoice = $this->records->find($project, 'facturas', (string) $request['record_uid']);
+        } catch (\Throwable) {
+            $invoice = $this->signatures->invoiceFromSnapshot($request);
+            $storedSnapshot = true;
+        }
+        $snapshot = $storedSnapshot ? (string) $request['invoice_snapshot'] : $this->signatures->snapshot($project, $invoice);
+        if (!hash_equals((string) $request['invoice_hash'], hash('sha256', $snapshot))) {
             throw new \RuntimeException('La factura cambió. Solicite un nuevo enlace de firma.', 409);
         }
-        return [$request, $project, $invoice];
+        return [$request, $project, $invoice, $storedSnapshot];
     }
 
     private function serveSignaturePage(string $token, bool $submit): void
@@ -725,9 +755,9 @@ final class ApiController
         $invoice = null;
         $error = '';
         try {
-            [$request, $project, $invoice] = $this->signingDocument($token);
+            [$request, $project, $invoice, $storedSnapshot] = $this->signingDocument($token);
             if ($submit) {
-                $this->signatures->sign($request, $project, $invoice, Http::input());
+                $this->signatures->sign($request, $project, $invoice, Http::input(), $storedSnapshot);
                 $request = $this->signatures->resolve($token);
             }
         } catch (\Throwable $e) {
