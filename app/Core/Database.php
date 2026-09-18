@@ -248,6 +248,18 @@ CREATE TABLE IF NOT EXISTS shared_documents (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_shared_documents_record ON shared_documents(project_uid, table_name, record_uid);
+CREATE TABLE IF NOT EXISTS onboarding_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT UNIQUE NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    project_uid TEXT REFERENCES projects(uid) ON DELETE SET NULL,
+    company_name TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_onboarding_links_status ON onboarding_links(status, created_at DESC);
 CREATE TABLE IF NOT EXISTS invoice_signature_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     uid TEXT UNIQUE NOT NULL,

@@ -23,6 +23,7 @@ use App\Services\SchemaService;
 use App\Services\LicenseService;
 use App\Services\StorageService;
 use App\Services\SystemRuntimeService;
+use App\Services\ClientOnboardingService;
 use App\Services\WebhookService;
 use Flight;
 
@@ -48,6 +49,7 @@ final class ApiController
         private ProjectSqlApiService $projectSql,
         private InvoiceSignatureService $signatures,
         private SystemRuntimeService $runtime,
+        private ClientOnboardingService $onboarding,
     ) {
     }
 
@@ -343,6 +345,8 @@ final class ApiController
         Flight::route('GET /sign/invoice/@token', fn ($token) => $this->serveSignaturePage((string) $token, false));
         Flight::route('POST /sign/invoice/@token', fn ($token) => $this->serveSignaturePage((string) $token, true));
         Flight::route('GET /sign/invoice/@token/preview', fn ($token) => $this->serveSignaturePreview((string) $token));
+        Flight::route('GET /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, false));
+        Flight::route('POST /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, true));
         Flight::route('GET /share/invoice/@token', function ($token): void {
             $rawToken = (string) $token;
             $asPdf = str_ends_with($rawToken, '.pdf');
@@ -794,6 +798,32 @@ final class ApiController
             header('Content-Type: text/plain; charset=UTF-8');
             echo 'Documento no disponible.';
         }
+    }
+
+    private function serveOnboardingPage(string $token, bool $submit): void
+    {
+        header('Cache-Control: no-store');
+        header('Referrer-Policy: no-referrer');
+        header('X-Robots-Tag: noindex, nofollow');
+        header('Content-Type: text/html; charset=UTF-8');
+        $this->keys->rateLimitPublic('onboarding:' . hash('sha256', $token), $submit ? 10 : 30);
+        $link = null;
+        $error = '';
+        $result = null;
+        try {
+            $link = $this->onboarding->resolve($token);
+            if ($submit) {
+                $result = $this->onboarding->complete($token, Http::input(), $_FILES['logo'] ?? null);
+            }
+        } catch (\Throwable $e) {
+            http_response_code(in_array($e->getCode(), [409, 429], true) ? $e->getCode() : ($submit && $link ? 422 : 404));
+            if (!$link) {
+                echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Enlace no disponible</title><body><main style="max-width:600px;margin:50px auto;font:18px system-ui"><h1>Enlace no disponible</h1><p>Solicite un enlace nuevo a TMPOS.</p></main></body></html>';
+                return;
+            }
+            $error = $e->getMessage();
+        }
+        require dirname(__DIR__) . '/Views/onboarding-form.php';
     }
 
     private function serveSharedInvoice(string $token, bool $asPdf): void

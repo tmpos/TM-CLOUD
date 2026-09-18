@@ -29,6 +29,7 @@ use App\Services\MailService;
 use App\Services\WebhookService;
 use App\Services\DatabaseBridgeService;
 use App\Services\SupportService;
+use App\Services\ClientOnboardingService;
 use Flight;
 use PDO;
 
@@ -58,6 +59,7 @@ final class WebController
         private SystemAppService $systemApps,
         private RealtimeService $realtime,
         private SupportService $support,
+        private ClientOnboardingService $onboarding,
     ) {
     }
 
@@ -536,6 +538,18 @@ final class WebController
             Http::flash('success', 'Device blocked.');
             Flight::redirect("/projects/$uid?tab=licenses");
         }));
+        Flight::route('GET /onboarding-links', fn () => $this->page(fn () => $this->onboardingLinksPage()));
+        Flight::route('POST /onboarding-links', fn () => $this->action(function () : void {
+            $link = $this->onboarding->create(Auth::user()['email'] ?? 'admin');
+            $_SESSION['_new_onboarding_link'] = $link['url'];
+            Http::flash('success', 'Enlace generado.');
+            Flight::redirect('/onboarding-links');
+        }));
+        Flight::route('POST /onboarding-links/@uid/delete', fn (string $uid) => $this->action(function () use ($uid): void {
+            $this->onboarding->delete($uid);
+            Http::flash('success', 'Enlace eliminado.');
+            Flight::redirect('/onboarding-links');
+        }));
         Flight::route('GET /licenses', fn () => $this->page(fn () => $this->licensesPage()));
         Flight::route('POST /licenses', fn () => $this->action(function (array $in): void {
             $projectUid = (string) ($in['project_uid'] ?? '');
@@ -775,6 +789,16 @@ final class WebController
         $licenses = $this->licenses->allGlobal();
         View::render('licenses-global', [
             'title' => 'All Licenses', 'projects' => $projects, 'licenses' => $licenses,
+            'flashes' => Http::flashes(),
+        ]);
+    }
+
+    private function onboardingLinksPage(): void
+    {
+        $newLink = $_SESSION['_new_onboarding_link'] ?? null;
+        unset($_SESSION['_new_onboarding_link']);
+        View::render('onboarding-links', [
+            'title' => 'Enlaces de registro', 'links' => $this->onboarding->all(), 'newLink' => $newLink,
             'flashes' => Http::flashes(),
         ]);
     }
