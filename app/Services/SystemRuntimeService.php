@@ -18,6 +18,9 @@ use RuntimeException;
  */
 final class SystemRuntimeService
 {
+    /** Used whenever a project hasn't configured a country yet under Configuracion > Sistema. */
+    private const DEFAULT_TIMEZONE = 'America/Santo_Domingo';
+
     private ?DateTimeZone $requestTimezone = null;
 
     public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks, private InvoiceSignatureService $signatures)
@@ -33,7 +36,7 @@ final class SystemRuntimeService
      */
     private function now(): string
     {
-        return (new DateTimeImmutable('now', $this->requestTimezone ?? new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
+        return (new DateTimeImmutable('now', $this->requestTimezone ?? new DateTimeZone(self::DEFAULT_TIMEZONE)))->format('Y-m-d H:i:s');
     }
 
     private function resolveTimezone(PDO $db): DateTimeZone
@@ -46,9 +49,10 @@ final class SystemRuntimeService
                 return new DateTimeZone($value);
             }
         } catch (\Throwable) {
-            // configuracion table missing or not yet seeded; fall back to UTC below.
+            // configuracion table missing, not yet seeded, or an invalid saved
+            // value; fall back to the default country below either way.
         }
-        return new DateTimeZone('UTC');
+        return new DateTimeZone(self::DEFAULT_TIMEZONE);
     }
 
     public function isWrite(string $action, array $input): bool
