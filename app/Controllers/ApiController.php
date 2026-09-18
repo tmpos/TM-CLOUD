@@ -257,6 +257,27 @@ final class ApiController
                 Http::error($e, $status);
             }
         });
+        Flight::route('POST /api/license/invoice/signature-request', function (): void {
+            try {
+                $input = Http::input();
+                [$project, $invoice] = $this->licensedInvoice($input, 'license-signature-create');
+                $expiresAt = isset($input['expires_at']) ? (string) $input['expires_at'] : null;
+                Flight::json(['data' => $this->signatures->create($project, $invoice, $expiresAt)], 201);
+            } catch (\Throwable $e) {
+                $status = in_array($e->getCode(), [403, 409, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+                Http::error($e, $status);
+            }
+        });
+        Flight::route('POST /api/license/invoice/signature', function (): void {
+            try {
+                $input = Http::input();
+                [$project, $invoice] = $this->licensedInvoice($input, 'license-signature-status');
+                Flight::json(['data' => $this->signatures->status($project, $invoice, true)]);
+            } catch (\Throwable $e) {
+                $status = in_array($e->getCode(), [403, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+                Http::error($e, $status);
+            }
+        });
         Flight::route('POST /api/@project/mail/send', fn ($project) => $this->runProject($project, true, function ($p): void {
             $input = Http::input();
             $job = $this->mail->queue(
@@ -299,7 +320,7 @@ final class ApiController
             $input = Http::input();
             Flight::json(['data' => $this->signatures->create($p, $invoice, isset($input['expires_at']) ? (string) $input['expires_at'] : null)], 201);
         }));
-        Flight::route('GET /api/@project/invoices/@uid/signature', fn ($project, $uid) => $this->runProject($project, true, function ($p) use ($uid): void {
+        Flight::route('GET /api/@project/invoices/@uid/signature', fn ($project, $uid) => $this->runProject($project, false, function ($p) use ($uid): void {
             $invoice = $this->records->find($p, 'facturas', (string) $uid);
             Flight::json(['data' => $this->signatures->status($p, $invoice, true)]);
         }));
@@ -665,6 +686,20 @@ final class ApiController
     {
         $header = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
         return preg_match('/^Bearer\s+(.+)$/i', $header, $matches) ? trim($matches[1]) : null;
+    }
+
+    private function licensedInvoice(array $input, string $rateKey): array
+    {
+        $licenseKey = trim((string) ($input['license_key'] ?? ''));
+        $deviceId = trim((string) ($input['device_id'] ?? ''));
+        $recordUid = trim((string) ($input['record_uid'] ?? ''));
+        $this->keys->rateLimitPublic($rateKey . ':' . hash('sha256', $licenseKey . ':' . $deviceId), 30);
+        if ($licenseKey === '' || $deviceId === '' || $recordUid === '') throw new \InvalidArgumentException('license_key, device_id and record_uid are required.');
+        $license = $this->licenses->findByKey($licenseKey);
+        if ($license['status'] !== 'active' || ($license['expires_at'] && $license['expires_at'] < date('Y-m-d H:i:s'))) throw new \RuntimeException('License is not active.', 403);
+        if (!$this->licenses->isDeviceAuthorized($license['uid'], $deviceId)) throw new \RuntimeException('Device is not authorized.', 403);
+        $project = $this->projects->findActive($license['project_uid']);
+        return [$project, $this->records->find($project, 'facturas', $recordUid)];
     }
 
     private function signingDocument(string $token): array
