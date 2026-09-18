@@ -22,6 +22,7 @@ use App\Services\RecordService;
 use App\Services\SchemaService;
 use App\Services\LicenseService;
 use App\Services\StorageService;
+use App\Services\SystemRuntimeService;
 use App\Services\WebhookService;
 use Flight;
 
@@ -46,6 +47,7 @@ final class ApiController
         private PortalAuth $portalAuth,
         private ProjectSqlApiService $projectSql,
         private InvoiceSignatureService $signatures,
+        private SystemRuntimeService $runtime,
     ) {
     }
 
@@ -384,6 +386,12 @@ final class ApiController
                     'realtime_ws_url' => !empty($this->config['realtime']['enabled']) ? ($this->config['realtime']['ws_url'] ?? null) : null,
                 ],
             ]);
+        }));
+        Flight::route('POST /api/@project/runtime', fn ($project) => $this->runProject($project, true, function ($p): void {
+            $input = Http::input();
+            $action = trim((string) ($input['action'] ?? ''));
+            $payload = is_array($input['data'] ?? null) ? $input['data'] : [];
+            Flight::json($this->runtime->handle($p, $action, $payload, ['email' => 'api-key']));
         }));
         Flight::route('POST /api/@project/sql', fn ($project) => $this->runProject($project, true, function ($p): void {
             Flight::json([

@@ -92,7 +92,7 @@ final class App
         (new SystemController($portalAuth, $projects, $systemRuntime, $keys, $systemApps, $projectSql, $storage))->register();
         (new StorefrontController($config, $storefronts, $projects, $records, $pdf, $keys, $storefrontCommerce, $mail))->register();
         (new StorefrontAdminController($storefrontAdmins, $storefronts, $projects, $pdf, $mail))->register();
-        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics, $mail, $sharedDocuments, $pdf, $portalAuth, $projectSql, $signatures))->register();
+        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics, $mail, $sharedDocuments, $pdf, $portalAuth, $projectSql, $signatures, $systemRuntime))->register();
     }
 
     private static function ensureStorage(string $storage): void
