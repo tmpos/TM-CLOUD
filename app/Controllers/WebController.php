@@ -141,8 +141,16 @@ final class WebController
             $this->systemApps->find($systemApp);
             $project = $this->projects->create($in);
             if ($systemApp !== 'default') $project = $this->projects->setSystemApp((string) $project['uid'], $systemApp);
-            Http::flash('success', 'Project created.');
-            Flight::redirect('/projects/' . $project['uid']);
+            $this->licenses->create((string) $project['uid'], [
+                'system_name' => (string) $project['name'],
+                'nombre' => (string) $project['name'],
+                'status' => 'active',
+                'project_url' => $this->config['url'] . '/api/' . $project['uid'],
+                'public_key' => $project['public_key'],
+                'secret_key' => $project['secret_key'],
+            ]);
+            Http::flash('success', 'Project and license created.');
+            Flight::redirect('/projects/' . $project['uid'] . '?tab=licenses');
         }));
         Flight::route('GET /projects/trash', fn () => $this->page(fn () => $this->trashPage()));
         Flight::route('GET /projects/@uid', fn (string $uid) => $this->page(fn () => $this->project($uid)));
