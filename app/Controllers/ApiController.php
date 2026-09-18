@@ -12,6 +12,7 @@ use App\Services\ImportExportService;
 use App\Services\MetricsService;
 use App\Services\MailService;
 use App\Services\SharedDocumentService;
+use App\Services\InvoiceSignatureService;
 use App\Services\PdfService;
 use App\Core\PortalAuth;
 use App\Services\LogService;
@@ -44,6 +45,7 @@ final class ApiController
         private PdfService $pdf,
         private PortalAuth $portalAuth,
         private ProjectSqlApiService $projectSql,
+        private InvoiceSignatureService $signatures,
     ) {
     }
 
@@ -292,6 +294,15 @@ final class ApiController
             $expiresAt = trim((string) ($input['expires_at'] ?? '')) ?: null;
             Flight::json(['data' => $this->sharedDocuments->create($p['uid'], 'invoice', 'facturas', $uid, $expiresAt)], 201);
         }));
+        Flight::route('POST /api/@project/invoices/@uid/signature-request', fn ($project, $uid) => $this->runProject($project, true, function ($p) use ($uid): void {
+            $invoice = $this->records->find($p, 'facturas', (string) $uid);
+            $input = Http::input();
+            Flight::json(['data' => $this->signatures->create($p, $invoice, isset($input['expires_at']) ? (string) $input['expires_at'] : null)], 201);
+        }));
+        Flight::route('GET /api/@project/invoices/@uid/signature', fn ($project, $uid) => $this->runProject($project, true, function ($p) use ($uid): void {
+            $invoice = $this->records->find($p, 'facturas', (string) $uid);
+            Flight::json(['data' => $this->signatures->status($p, $invoice, true)]);
+        }));
         Flight::route('POST /api/@project/invoices/@uid/email', fn ($project, $uid) => $this->runProject($project, true, function ($p) use ($uid): void {
             $invoice = $this->records->find($p, 'facturas', $uid);
             $input = Http::input();
@@ -306,6 +317,9 @@ final class ApiController
             $this->sharedDocuments->revoke($p['uid'], $uid);
             Flight::json(['data' => ['revoked' => true]]);
         }));
+        Flight::route('GET /sign/invoice/@token', fn ($token) => $this->serveSignaturePage((string) $token, false));
+        Flight::route('POST /sign/invoice/@token', fn ($token) => $this->serveSignaturePage((string) $token, true));
+        Flight::route('GET /sign/invoice/@token/preview', fn ($token) => $this->serveSignaturePreview((string) $token));
         Flight::route('GET /share/invoice/@token', function ($token): void {
             $rawToken = (string) $token;
             $asPdf = str_ends_with($rawToken, '.pdf');
@@ -651,6 +665,62 @@ final class ApiController
     {
         $header = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
         return preg_match('/^Bearer\s+(.+)$/i', $header, $matches) ? trim($matches[1]) : null;
+    }
+
+    private function signingDocument(string $token): array
+    {
+        $this->keys->rateLimitPublic('sign-invoice:' . hash('sha256', $token), 30);
+        $request = $this->signatures->resolve($token);
+        $project = $this->projects->findActive((string) $request['project_uid']);
+        $invoice = $this->records->find($project, 'facturas', (string) $request['record_uid']);
+        if (!hash_equals((string) $request['invoice_hash'], hash('sha256', $this->signatures->snapshot($project, $invoice)))) {
+            throw new \RuntimeException('La factura cambió. Solicite un nuevo enlace de firma.', 409);
+        }
+        return [$request, $project, $invoice];
+    }
+
+    private function serveSignaturePage(string $token, bool $submit): void
+    {
+        header('Cache-Control: no-store');
+        header('Referrer-Policy: no-referrer');
+        header('X-Robots-Tag: noindex, nofollow');
+        header('Content-Type: text/html; charset=UTF-8');
+        $request = null;
+        $project = null;
+        $invoice = null;
+        $error = '';
+        try {
+            [$request, $project, $invoice] = $this->signingDocument($token);
+            if ($submit) {
+                $this->signatures->sign($request, $project, $invoice, Http::input());
+                $request = $this->signatures->resolve($token);
+            }
+        } catch (\Throwable $e) {
+            http_response_code(in_array($e->getCode(), [409, 429], true) ? $e->getCode() : ($submit && $request ? 422 : 404));
+            if (!$request || !$project || !$invoice) {
+                echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Enlace no disponible</title><body><main style="max-width:600px;margin:50px auto;font:18px system-ui"><h1>Enlace de firma no disponible</h1><p>Solicite un enlace nuevo a la empresa.</p></main></body></html>';
+                return;
+            }
+            $error = $e->getMessage();
+        }
+        require dirname(__DIR__) . '/Views/invoice-sign.php';
+    }
+
+    private function serveSignaturePreview(string $token): void
+    {
+        header('Cache-Control: no-store');
+        header('Referrer-Policy: no-referrer');
+        header('X-Robots-Tag: noindex, nofollow');
+        try {
+            [$request, $project, $invoice] = $this->signingDocument($token);
+            if ($request['signed_at'] !== null) throw new \RuntimeException('El enlace ya fue utilizado.', 404);
+            header('Content-Type: text/html; charset=UTF-8');
+            echo $this->pdf->invoiceHtml($project, $invoice);
+        } catch (\Throwable) {
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo 'Documento no disponible.';
+        }
     }
 
     private function serveSharedInvoice(string $token, bool $asPdf): void

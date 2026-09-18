@@ -16,7 +16,7 @@ use RuntimeException;
  */
 final class SystemRuntimeService
 {
-    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks)
+    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks, private InvoiceSignatureService $signatures)
     {
     }
 
@@ -27,6 +27,7 @@ final class SystemRuntimeService
         $channel = (string) ($input['channel'] ?? '');
         if (str_starts_with($channel, 'db:get') || in_array($channel, [
             'config:get', 'auth:login', 'caja:getTurnoActivo', 'caja:getTurnoAbierto',
+            'facturas:obtenerFirma',
             'cuadre:listar', 'cuadre:ventasTurno', 'cuadre:gastosTurno', 'app:getName',
             'app:getVersion', 'getServerUrl', 'getPrinters', 'scan:bluetooth',
         ], true)) return false;
@@ -157,6 +158,8 @@ final class SystemRuntimeService
         if ($channel === 'config:get') return $this->configGet($db, (string) ($args[0] ?? ''));
         if ($channel === 'config:set') return $this->configSet($db, ['clave' => $args[0] ?? '', 'valor' => $args[1] ?? '', 'categoria' => $args[2] ?? 'general']);
         if ($channel === 'facturas:crearEnlacePdf') return $this->shareInvoice($db, $project, (array) ($args[0] ?? []));
+        if ($channel === 'facturas:crearEnlaceFirma') return $this->signatureInvoice($db, $project, (array) ($args[0] ?? []), true);
+        if ($channel === 'facturas:obtenerFirma') return $this->signatureInvoice($db, $project, (array) ($args[0] ?? []), false);
         if ($channel === 'db:exec') return $this->executeSql($db, (string) ($args[0] ?? ''), true);
         if ($channel === 'consultaservidor') return $this->consultaServidor($db, $project, $args);
         if (in_array($channel, ['caja:getTurnoActivo', 'caja:getTurnoAbierto'], true)) return $this->turnoActivo($db, (string) ($args[0] ?? ''));
@@ -210,6 +213,19 @@ final class SystemRuntimeService
             $recordUid,
             $expiresAt
         )];
+    }
+
+    private function signatureInvoice(PDO $db, array $project, array $input, bool $create): array
+    {
+        $recordUid = trim((string) ($input['record_uid'] ?? ''));
+        if ($recordUid === '') throw new InvalidArgumentException('La factura no tiene identificador de sincronizacion.');
+        $stmt = $db->prepare('SELECT * FROM facturas WHERE uid = ? LIMIT 1');
+        $stmt->execute([$recordUid]);
+        $invoice = $stmt->fetch();
+        if (!$invoice) throw new RuntimeException('La factura no existe o aun no esta sincronizada.', 404);
+        return ['success' => true, 'data' => $create
+            ? $this->signatures->create($project, $invoice, isset($input['expires_at']) ? (string) $input['expires_at'] : null)
+            : $this->signatures->status($project, $invoice, true)];
     }
 
     private function authLogin(PDO $db, array $input): array

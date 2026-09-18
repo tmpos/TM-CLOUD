@@ -248,6 +248,29 @@ CREATE TABLE IF NOT EXISTS shared_documents (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_shared_documents_record ON shared_documents(project_uid, table_name, record_uid);
+CREATE TABLE IF NOT EXISTS invoice_signature_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT UNIQUE NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    project_uid TEXT NOT NULL REFERENCES projects(uid) ON DELETE CASCADE,
+    record_uid TEXT NOT NULL,
+    invoice_snapshot TEXT NOT NULL,
+    invoice_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    signer_name TEXT,
+    signature_png BLOB,
+    signature_sha256 TEXT,
+    consent_text TEXT,
+    consent_at TEXT,
+    signer_ip TEXT,
+    signer_user_agent TEXT,
+    signed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_signature_record ON invoice_signature_requests(project_uid, record_uid, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_signature_signed_version ON invoice_signature_requests(project_uid, record_uid, invoice_hash) WHERE signed_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS portal_users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     uid TEXT UNIQUE NOT NULL,
