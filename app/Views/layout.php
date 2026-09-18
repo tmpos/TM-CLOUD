@@ -23,12 +23,12 @@ $flashes = $flashes ?? [];
 <body class="min-h-screen bg-ink text-slate-200 antialiased">
 <?php if ($authenticated): ?>
 <div class="min-h-screen lg:flex">
-    <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-line bg-[#0c1218] lg:block">
-        <div class="flex h-16 items-center gap-3 border-b border-line px-6">
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-line bg-[#0c1218] lg:flex">
+        <div class="flex h-16 shrink-0 items-center gap-3 border-b border-line px-6">
             <span class="grid h-9 w-9 place-items-center rounded-xl bg-brand font-black text-ink">T</span>
             <div><strong class="block text-white">TMPBase</strong><span class="text-xs text-slate-500">Private backend platform</span></div>
         </div>
-        <nav class="space-y-1 p-4 text-sm">
+        <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto p-4 text-sm">
             <?php if (Auth::hasComponent('projects')): ?>
             <a href="/dashboard" class="nav-link">Dashboard</a>
             <a href="/dashboard#projects" class="nav-link">Projects</a>
@@ -51,8 +51,7 @@ $flashes = $flashes ?? [];
             <a href="/users" class="nav-link">Usuarios</a>
             <?php endif; ?>
         </nav>
-        <div class="absolute inset-x-4 bottom-4 rounded-xl border border-line bg-panel p-3 text-xs text-slate-400">
-            <div style="background:#ff2d55;color:#fff;padding:6px;border-radius:6px;margin-bottom:8px;font-weight:700">DEBUG role=<?= e(Auth::user()['role'] ?? 'NONE') ?> perms=<?= e(implode(',', (array) (Auth::user()['permissions'] ?? []))) ?: 'NONE' ?></div>
+        <div class="m-4 mt-0 shrink-0 rounded-xl border border-line bg-panel p-3 text-xs text-slate-400">
             Signed in as <strong class="mt-1 block truncate text-slate-200"><?= e(Auth::user()['email'] ?? '') ?></strong>
             <form method="post" action="/logout" class="mt-3"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><button class="text-rose-400 hover:text-rose-300">Sign out</button></form>
         </div>

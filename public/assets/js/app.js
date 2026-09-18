@@ -1,5 +1,7 @@
 document.querySelector('[data-sidebar-toggle]')?.addEventListener('click', () => {
-    document.querySelector('#sidebar')?.classList.toggle('hidden');
+    const sidebar = document.querySelector('#sidebar');
+    sidebar?.classList.toggle('hidden');
+    sidebar?.classList.toggle('flex');
 });
 document.querySelectorAll('[data-dialog-open]').forEach(button => {
     button.addEventListener('click', () => document.querySelector(button.dataset.dialogOpen)?.showModal());
