@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Core\Support;
+use DateTimeImmutable;
+use DateTimeZone;
 use InvalidArgumentException;
 use PDO;
 use RuntimeException;
@@ -16,8 +18,37 @@ use RuntimeException;
  */
 final class SystemRuntimeService
 {
+    private ?DateTimeZone $requestTimezone = null;
+
     public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks, private InvoiceSignatureService $signatures)
     {
+    }
+
+    /**
+     * "Now" for this request, in the country/timezone configured under
+     * Configuracion > Sistema (sistema_zona_horaria), not the server's own
+     * clock. The desktop app already timestamps in the operator's local
+     * time; the browser runtime used to stamp everything in server UTC,
+     * which is wrong for anyone not hosted in the same timezone as the VPS.
+     */
+    private function now(): string
+    {
+        return (new DateTimeImmutable('now', $this->requestTimezone ?? new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
+    }
+
+    private function resolveTimezone(PDO $db): DateTimeZone
+    {
+        try {
+            $stmt = $db->prepare("SELECT valor FROM configuracion WHERE clave = 'sistema_zona_horaria' LIMIT 1");
+            $stmt->execute();
+            $value = trim((string) $stmt->fetchColumn());
+            if ($value !== '') {
+                return new DateTimeZone($value);
+            }
+        } catch (\Throwable) {
+            // configuracion table missing or not yet seeded; fall back to UTC below.
+        }
+        return new DateTimeZone('UTC');
     }
 
     public function isWrite(string $action, array $input): bool
@@ -41,6 +72,7 @@ final class SystemRuntimeService
     public function handle(array $project, string $action, array $input, array $actor): mixed
     {
         $db = $this->schema->connection($project);
+        $this->requestTimezone = $this->resolveTimezone($db);
         return match ($action) {
             'db/getAll' => $this->getAll($db, $input),
             'db/getWhere' => $this->getWhere($db, $input),
@@ -104,7 +136,7 @@ final class SystemRuntimeService
         $table = $this->table($db, $tableName);
         $this->ensureAccessoryCommissionColumns($db, $tableName);
         $data = $this->cleanData($db, $tableName, (array) ($input['data'] ?? []), true);
-        $now = gmdate('Y-m-d H:i:s');
+        $now = $this->now();
         if ($this->hasColumn($db, $tableName, 'uid') && empty($data['uid'])) $data['uid'] = Support::uid('rec_');
         if ($this->hasColumn($db, $tableName, 'created_at') && empty($data['created_at'])) $data['created_at'] = $now;
         if ($this->hasColumn($db, $tableName, 'updated_at') && empty($data['updated_at'])) $data['updated_at'] = $now;
@@ -128,7 +160,7 @@ final class SystemRuntimeService
         $old = $this->row($db, $table, $id);
         $data = $this->cleanData($db, $tableName, (array) ($input['data'] ?? []), false);
         unset($data['id'], $data['uid'], $data['created_at']);
-        if ($this->hasColumn($db, $tableName, 'updated_at')) $data['updated_at'] = gmdate('Y-m-d H:i:s');
+        if ($this->hasColumn($db, $tableName, 'updated_at')) $data['updated_at'] = $this->now();
         if (!$data) return ['success' => true, 'data' => ['id' => $id]];
         $sets = implode(',', array_map(fn (string $column): string => Support::quoteIdentifier($column) . ' = ?', array_keys($data)));
         $db->prepare("UPDATE $table SET $sets WHERE id = ?")->execute([...array_values($data), $id]);
@@ -279,7 +311,7 @@ final class SystemRuntimeService
             if ($exists->fetchColumn()) throw new RuntimeException('La factura ya existe.');
             $facturaId = $this->insertRaw($db, $project, 'facturas', $factura);
             if (!empty($payload['cuenta_cobrar'])) $this->insertRaw($db, $project, 'cuentas_cobrar', (array) $payload['cuenta_cobrar']);
-            if (!empty($payload['comprobante_id'])) $db->prepare('UPDATE comprobantes_fiscales SET secuencia_actual=secuencia_actual+1, updated_at=? WHERE id=?')->execute([gmdate('Y-m-d H:i:s'), (int) $payload['comprobante_id']]);
+            if (!empty($payload['comprobante_id'])) $db->prepare('UPDATE comprobantes_fiscales SET secuencia_actual=secuencia_actual+1, updated_at=? WHERE id=?')->execute([$this->now(), (int) $payload['comprobante_id']]);
             foreach ((array) ($payload['inventario'] ?? []) as $item) {
                 $tableName = (string) ($item['tabla'] ?? '');
                 if (!in_array($tableName, ['imei', 'serial', 'accesorios'], true)) throw new InvalidArgumentException('Producto de inventario no valido.');
@@ -290,7 +322,7 @@ final class SystemRuntimeService
                     // atomica; el aviso de realtime se dispara aparte, solo si de
                     // verdad descontó algo (rowCount>0), igual que hace updateRaw.
                     $stmt = $db->prepare("UPDATE $table SET cantidad=cantidad-?, updated_at=? WHERE id=? AND cantidad>=?");
-                    $stmt->execute([(float) ($item['cantidad'] ?? 0), gmdate('Y-m-d H:i:s'), (int) $item['id'], (float) ($item['cantidad'] ?? 0)]);
+                    $stmt->execute([(float) ($item['cantidad'] ?? 0), $this->now(), (int) $item['id'], (float) ($item['cantidad'] ?? 0)]);
                     if ($stmt->rowCount() > 0) $this->webhooks->dispatch('record.updated', $project, $tableName, $this->row($db, $table, (int) $item['id']));
                 } else {
                     $this->updateRaw($db, $project, $tableName, (int) $item['id'], (array) ($item['cambios'] ?? []));
@@ -298,7 +330,7 @@ final class SystemRuntimeService
             }
             foreach ((array) ($payload['bancos'] ?? []) as $mov) {
                 if ((int) ($mov['id'] ?? 0) <= 0 || (float) ($mov['monto'] ?? 0) <= 0) continue;
-                $db->prepare('UPDATE bancos SET saldo=saldo+?, fecha_transaccion=?, updated_at=? WHERE id=?')->execute([(float) $mov['monto'], gmdate('Y-m-d H:i:s'), gmdate('Y-m-d H:i:s'), (int) $mov['id']]);
+                $db->prepare('UPDATE bancos SET saldo=saldo+?, fecha_transaccion=?, updated_at=? WHERE id=?')->execute([(float) $mov['monto'], $this->now(), $this->now(), (int) $mov['id']]);
                 $this->webhooks->dispatch('record.updated', $project, 'bancos', $this->row($db, 'bancos', (int) $mov['id']));
             }
             $db->commit();
@@ -315,8 +347,8 @@ final class SystemRuntimeService
             $factura = $stmt->fetch() ?: throw new RuntimeException('La factura no esta pendiente.');
             $total = (float) ($factura['total'] ?? 0); $efectivo=(float)($p['efectivo']??0); $tarjeta=(float)($p['tarjeta']??0); $transferencia=(float)($p['transferencia']??0);
             if (abs(($efectivo+$tarjeta+$transferencia)-$total) >= .01) throw new InvalidArgumentException('La distribucion del pago no coincide con el total.');
-            $db->prepare("UPDATE facturas SET estado_factura='PAGADA', metodo_pago=?, efectivo=?, tarjeta=?, transferencia=?, updated_at=? WHERE id=?")->execute([(string)($p['metodo_pago']??''),$efectivo,$tarjeta,$transferencia,gmdate('Y-m-d H:i:s'),$id]);
-            if ((int)($p['banco_id']??0)>0 && $tarjeta+$transferencia>0) $db->prepare('UPDATE bancos SET saldo=saldo+?, updated_at=? WHERE id=?')->execute([$tarjeta+$transferencia,gmdate('Y-m-d H:i:s'),(int)$p['banco_id']]);
+            $db->prepare("UPDATE facturas SET estado_factura='PAGADA', metodo_pago=?, efectivo=?, tarjeta=?, transferencia=?, updated_at=? WHERE id=?")->execute([(string)($p['metodo_pago']??''),$efectivo,$tarjeta,$transferencia,$this->now(),$id]);
+            if ((int)($p['banco_id']??0)>0 && $tarjeta+$transferencia>0) $db->prepare('UPDATE bancos SET saldo=saldo+?, updated_at=? WHERE id=?')->execute([$tarjeta+$transferencia,$this->now(),(int)$p['banco_id']]);
             $this->webhooks->dispatch('record.updated', $project, 'facturas', $this->row($db, 'facturas', $id));
             $db->commit(); return ['success'=>true,'data'=>['id'=>$id]];
         } catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
@@ -330,7 +362,7 @@ final class SystemRuntimeService
     }
 
     private function abrirTurno(PDO $db, array $project, array $data): array { return ['success'=>true,'data'=>['id'=>$this->insertRaw($db,$project,'caja_turnos',$data+['entradas'=>0,'retiros'=>0,'estado'=>'abierto'])]]; }
-    private function cerrarTurno(PDO $db, int $id, array $data): array { $db->prepare("UPDATE caja_turnos SET estado='cerrado',monto_final=?,efectivo_esperado=?,diferencia=?,cierre_ciego=?,updated_at=? WHERE id=? AND estado='abierto'")->execute([(float)($data['monto_final']??0),(float)($data['efectivo_esperado']??0),(float)($data['diferencia']??0),!empty($data['cierre_ciego'])?1:0,gmdate('Y-m-d H:i:s'),$id]); return ['success'=>true]; }
+    private function cerrarTurno(PDO $db, int $id, array $data): array { $db->prepare("UPDATE caja_turnos SET estado='cerrado',monto_final=?,efectivo_esperado=?,diferencia=?,cierre_ciego=?,updated_at=? WHERE id=? AND estado='abierto'")->execute([(float)($data['monto_final']??0),(float)($data['efectivo_esperado']??0),(float)($data['diferencia']??0),!empty($data['cierre_ciego'])?1:0,$this->now(),$id]); return ['success'=>true]; }
 
     private function movimientosCaja(PDO $db, int $turnoId): array
     {
@@ -344,7 +376,7 @@ final class SystemRuntimeService
         $id = $this->insertRaw($db, $project, 'caja_movimientos', $data);
         $type = strtolower((string) ($data['tipo'] ?? 'entrada'));
         $column = in_array($type, ['retiro', 'salida'], true) ? 'retiros' : 'entradas';
-        $db->prepare("UPDATE caja_turnos SET $column=COALESCE($column,0)+?,updated_at=? WHERE id=?")->execute([(float) ($data['monto'] ?? $data['cantidad'] ?? 0), gmdate('Y-m-d H:i:s'), (int) ($data['turno_id'] ?? 0)]);
+        $db->prepare("UPDATE caja_turnos SET $column=COALESCE($column,0)+?,updated_at=? WHERE id=?")->execute([(float) ($data['monto'] ?? $data['cantidad'] ?? 0), $this->now(), (int) ($data['turno_id'] ?? 0)]);
         return ['success' => true, 'data' => ['id' => $id]];
     }
 
@@ -390,7 +422,7 @@ final class SystemRuntimeService
     }
 
     private function bank(PDO $db,int $id,string $uid):array|false { if($uid!==''){$stmt=$db->prepare('SELECT * FROM bancos WHERE uid=? LIMIT 1');$stmt->execute([$uid]);}else{$stmt=$db->prepare('SELECT * FROM bancos WHERE id=? LIMIT 1');$stmt->execute([$id]);}return$stmt->fetch(); }
-    private function changeBank(PDO $db,int $id,string $uid,float $delta):void { $bank=$this->bank($db,$id,$uid);if(!$bank)throw new RuntimeException('No se encontro el banco asociado.');$db->prepare('UPDATE bancos SET saldo=?,fecha_transaccion=?,updated_at=? WHERE id=?')->execute([(float)$bank['saldo']+$delta,gmdate('Y-m-d H:i:s'),gmdate('Y-m-d H:i:s'),(int)$bank['id']]); }
+    private function changeBank(PDO $db,int $id,string $uid,float $delta):void { $bank=$this->bank($db,$id,$uid);if(!$bank)throw new RuntimeException('No se encontro el banco asociado.');$db->prepare('UPDATE bancos SET saldo=?,fecha_transaccion=?,updated_at=? WHERE id=?')->execute([(float)$bank['saldo']+$delta,$this->now(),$this->now(),(int)$bank['id']]); }
 
     private function registrarPrecios(PDO $db,array $project,array $p):array { foreach((array)($p['cambios']??[])as$change)if((string)($change['anterior']??'')!==(string)($change['nuevo']??''))$this->insertRaw($db,$project,'historial_precios',['tabla'=>$p['tabla']??'','producto_id'=>$p['producto_id']??0,'producto_nombre'=>$p['producto_nombre']??'','campo'=>$change['campo']??'','valor_anterior'=>$change['anterior']??'','valor_nuevo'=>$change['nuevo']??'','usuario'=>'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true]; }
 
@@ -427,7 +459,7 @@ final class SystemRuntimeService
         $stmt = $db->prepare('SELECT * FROM otp_config WHERE uid = ? LIMIT 1');
         $stmt->execute([self::OTP_CONFIG_UID]);
         $row = $stmt->fetch();
-        $now = gmdate('Y-m-d H:i:s');
+        $now = $this->now();
         if (!$row) {
             $secret = bin2hex(random_bytes(32));
             $db->prepare('INSERT INTO otp_config (uid, mode, fixed_code, interval_seconds, send_email, secret, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
@@ -476,7 +508,7 @@ final class SystemRuntimeService
         $sendEmail = !empty($data['sendEmail']) ? 1 : 0;
         $secret = !empty($data['regenerateSecret']) ? bin2hex(random_bytes(32)) : (string) $row['secret'];
         $db->prepare('UPDATE otp_config SET mode=?, fixed_code=?, interval_seconds=?, send_email=?, secret=?, updated_at=? WHERE uid=?')
-            ->execute([$mode, $fixedCode, $intervalSeconds, $sendEmail, $secret, gmdate('Y-m-d H:i:s'), self::OTP_CONFIG_UID]);
+            ->execute([$mode, $fixedCode, $intervalSeconds, $sendEmail, $secret, $this->now(), self::OTP_CONFIG_UID]);
         return $this->otpStatus($db);
     }
 
@@ -495,12 +527,12 @@ final class SystemRuntimeService
     {
         $tableName=(string)($p['tabla']??''); if(!in_array($tableName,['imei','serial','accesorios','electrodomesticos','piezas'],true)) throw new InvalidArgumentException('Tabla no permitida.');
         $table=$this->table($db,$tableName); $db->beginTransaction();
-        try { foreach((array)($p['items']??[]) as $item){ $id=(int)($item['id']??0); if($tableName==='accesorios' && (float)($item['cantidad']??1)>0){ $stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$qty=(float)$item['cantidad'];if((float)$row['cantidad']<$qty)throw new RuntimeException('Cantidad insuficiente.');$db->prepare("UPDATE $table SET cantidad=cantidad-?,updated_at=? WHERE id=?")->execute([$qty,gmdate('Y-m-d H:i:s'),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$table,$id));$copy=$row;unset($copy['id']);$copy['cantidad']=$qty;$copy['almacen_id']=(int)($p['destino_id']??0);$copy['almacen_uid']=(string)($p['destino_uid']??'');$copy['uid']=Support::uid('rec_');$this->insertRaw($db,$project,$tableName,$copy);}else{$db->prepare("UPDATE $table SET almacen_id=?,almacen_uid=?,updated_at=? WHERE id=?")->execute([(int)($p['destino_id']??0),(string)($p['destino_uid']??''),gmdate('Y-m-d H:i:s'),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$table,$id));}} if(!empty($p['transferencia']))$this->insertRaw($db,$project,'transferencias',(array)$p['transferencia']);$db->commit();return['success'=>true];}catch(\Throwable $e){if($db->inTransaction())$db->rollBack();throw$e;}
+        try { foreach((array)($p['items']??[]) as $item){ $id=(int)($item['id']??0); if($tableName==='accesorios' && (float)($item['cantidad']??1)>0){ $stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$qty=(float)$item['cantidad'];if((float)$row['cantidad']<$qty)throw new RuntimeException('Cantidad insuficiente.');$db->prepare("UPDATE $table SET cantidad=cantidad-?,updated_at=? WHERE id=?")->execute([$qty,$this->now(),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$table,$id));$copy=$row;unset($copy['id']);$copy['cantidad']=$qty;$copy['almacen_id']=(int)($p['destino_id']??0);$copy['almacen_uid']=(string)($p['destino_uid']??'');$copy['uid']=Support::uid('rec_');$this->insertRaw($db,$project,$tableName,$copy);}else{$db->prepare("UPDATE $table SET almacen_id=?,almacen_uid=?,updated_at=? WHERE id=?")->execute([(int)($p['destino_id']??0),(string)($p['destino_uid']??''),$this->now(),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$table,$id));}} if(!empty($p['transferencia']))$this->insertRaw($db,$project,'transferencias',(array)$p['transferencia']);$db->commit();return['success'=>true];}catch(\Throwable $e){if($db->inTransaction())$db->rollBack();throw$e;}
     }
 
     private function ajustar(PDO $db, array $project, array $p): array
     {
-        $tableName=(string)($p['tabla']??'');$table=$this->table($db,$tableName);$id=(int)($p['producto_id']??0);$stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$before=(float)($row['cantidad']??0);$after=(float)($p['cantidad_nueva']??0);$db->prepare("UPDATE $table SET cantidad=?,updated_at=? WHERE id=?")->execute([$after,gmdate('Y-m-d H:i:s'),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$table,$id));$this->insertRaw($db,$project,'ajustes_inventario',['tabla'=>$tableName,'producto_id'=>$id,'producto_nombre'=>$row['nombre']??'','cantidad_anterior'=>$before,'cantidad_nueva'=>$after,'diferencia'=>$after-$before,'tipo'=>$p['tipo']??'','motivo'=>$p['motivo']??'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true,'data'=>['anterior'=>$before,'nueva'=>$after,'diferencia'=>$after-$before]];
+        $tableName=(string)($p['tabla']??'');$table=$this->table($db,$tableName);$id=(int)($p['producto_id']??0);$stmt=$db->prepare("SELECT * FROM $table WHERE id=?");$stmt->execute([$id]);$row=$stmt->fetch()?:throw new RuntimeException('Producto no encontrado.');$before=(float)($row['cantidad']??0);$after=(float)($p['cantidad_nueva']??0);$db->prepare("UPDATE $table SET cantidad=?,updated_at=? WHERE id=?")->execute([$after,$this->now(),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$table,$id));$this->insertRaw($db,$project,'ajustes_inventario',['tabla'=>$tableName,'producto_id'=>$id,'producto_nombre'=>$row['nombre']??'','cantidad_anterior'=>$before,'cantidad_nueva'=>$after,'diferencia'=>$after-$before,'tipo'=>$p['tipo']??'','motivo'=>$p['motivo']??'','almacen_id'=>$p['almacen_id']??0,'almacen_uid'=>$p['almacen_uid']??'']);return['success'=>true,'data'=>['anterior'=>$before,'nueva'=>$after,'diferencia'=>$after-$before]];
     }
 
     private function consultaServidor(PDO $db, array $project, array $args): mixed
@@ -578,7 +610,7 @@ final class SystemRuntimeService
         if($key==='')throw new InvalidArgumentException('Clave requerida.');
         $value=(string)($p['valor']??'');
         $category=(string)($p['categoria']??'general');
-        $now=gmdate('Y-m-d H:i:s');
+        $now=$this->now();
         $update=$db->prepare('UPDATE configuracion SET valor=?,categoria=?,updated_at=? WHERE clave=?');
         $update->execute([$value,$category,$now,$key]);
         if($update->rowCount()===0){
@@ -593,9 +625,9 @@ final class SystemRuntimeService
     }
     private function bitacora(PDO $db,int $limit):array { if(!$this->exists($db,'bitacora'))return['success'=>true,'data'=>[]];$limit=max(1,min(5000,$limit));return['success'=>true,'data'=>$db->query("SELECT * FROM bitacora ORDER BY id DESC LIMIT $limit")->fetchAll()]; }
     private function clearBitacora(PDO $db):array { if($this->exists($db,'bitacora'))$db->exec('DELETE FROM bitacora');return['success'=>true]; }
-    private function audit(PDO $db,string $table,int $id,string $action,array $actor,mixed $new,mixed $old):void { if(!$this->exists($db,'bitacora'))return;try{$stmt=$db->prepare('INSERT INTO bitacora(tabla,registro_id,accion,usuario,datos_nuevos,datos_anteriores,uid,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)');$now=gmdate('Y-m-d H:i:s');$stmt->execute([$table,$id,$action,(string)($actor['email']??''),json_encode($new,JSON_UNESCAPED_UNICODE),json_encode($old,JSON_UNESCAPED_UNICODE),Support::uid('rec_'),$now,$now]);}catch(\Throwable){} }
-    private function insertRaw(PDO $db,array $project,string $tableName,array $data):int { $this->table($db,$tableName);$data=$this->cleanData($db,$tableName,$data,true);$now=gmdate('Y-m-d H:i:s');if($this->hasColumn($db,$tableName,'uid')&&empty($data['uid']))$data['uid']=Support::uid('rec_');if($this->hasColumn($db,$tableName,'created_at')&&empty($data['created_at']))$data['created_at']=$now;if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=$now;$cols=array_keys($data);$db->prepare('INSERT INTO '.Support::quoteIdentifier($tableName).' ('.implode(',',array_map([Support::class,'quoteIdentifier'],$cols)).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).')')->execute(array_values($data));$id=(int)$db->lastInsertId();$this->webhooks->dispatch('record.created',$project,$tableName,$this->row($db,$this->table($db,$tableName),$id));return$id; }
-    private function updateRaw(PDO $db,array $project,string $tableName,int $id,array $data):void { $data=$this->cleanData($db,$tableName,$data,false);if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=gmdate('Y-m-d H:i:s');unset($data['id']);if(!$data)return;$set=implode(',',array_map(fn($c)=>Support::quoteIdentifier($c).'=?',array_keys($data)));$db->prepare('UPDATE '.Support::quoteIdentifier($tableName)." SET $set WHERE id=?")->execute([...array_values($data),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$this->table($db,$tableName),$id)); }
+    private function audit(PDO $db,string $table,int $id,string $action,array $actor,mixed $new,mixed $old):void { if(!$this->exists($db,'bitacora'))return;try{$stmt=$db->prepare('INSERT INTO bitacora(tabla,registro_id,accion,usuario,datos_nuevos,datos_anteriores,uid,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)');$now=$this->now();$stmt->execute([$table,$id,$action,(string)($actor['email']??''),json_encode($new,JSON_UNESCAPED_UNICODE),json_encode($old,JSON_UNESCAPED_UNICODE),Support::uid('rec_'),$now,$now]);}catch(\Throwable){} }
+    private function insertRaw(PDO $db,array $project,string $tableName,array $data):int { $this->table($db,$tableName);$data=$this->cleanData($db,$tableName,$data,true);$now=$this->now();if($this->hasColumn($db,$tableName,'uid')&&empty($data['uid']))$data['uid']=Support::uid('rec_');if($this->hasColumn($db,$tableName,'created_at')&&empty($data['created_at']))$data['created_at']=$now;if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=$now;$cols=array_keys($data);$db->prepare('INSERT INTO '.Support::quoteIdentifier($tableName).' ('.implode(',',array_map([Support::class,'quoteIdentifier'],$cols)).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).')')->execute(array_values($data));$id=(int)$db->lastInsertId();$this->webhooks->dispatch('record.created',$project,$tableName,$this->row($db,$this->table($db,$tableName),$id));return$id; }
+    private function updateRaw(PDO $db,array $project,string $tableName,int $id,array $data):void { $data=$this->cleanData($db,$tableName,$data,false);if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=$this->now();unset($data['id']);if(!$data)return;$set=implode(',',array_map(fn($c)=>Support::quoteIdentifier($c).'=?',array_keys($data)));$db->prepare('UPDATE '.Support::quoteIdentifier($tableName)." SET $set WHERE id=?")->execute([...array_values($data),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$this->table($db,$tableName),$id)); }
     private function ensureAccessoryCommissionColumns(PDO $db, string $table): void
     {
         if ($table !== 'accesorios') return;
