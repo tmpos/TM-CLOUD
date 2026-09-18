@@ -52,6 +52,7 @@ $flashes = $flashes ?? [];
             <?php endif; ?>
         </nav>
         <div class="absolute inset-x-4 bottom-4 rounded-xl border border-line bg-panel p-3 text-xs text-slate-400">
+            <div style="background:#ff2d55;color:#fff;padding:6px;border-radius:6px;margin-bottom:8px;font-weight:700">DEBUG role=<?= e(Auth::user()['role'] ?? 'NONE') ?> perms=<?= e(implode(',', (array) (Auth::user()['permissions'] ?? []))) ?: 'NONE' ?></div>
             Signed in as <strong class="mt-1 block truncate text-slate-200"><?= e(Auth::user()['email'] ?? '') ?></strong>
             <form method="post" action="/logout" class="mt-3"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><button class="text-rose-400 hover:text-rose-300">Sign out</button></form>
         </div>
