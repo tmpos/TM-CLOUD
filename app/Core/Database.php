@@ -586,6 +586,9 @@ SQL);
             try { $db->exec($migration); } catch (\Throwable) {}
         }
         try { $db->exec("ALTER TABLE projects ADD COLUMN system_app TEXT NOT NULL DEFAULT 'default'"); } catch (\Throwable) {}
+        foreach (["ALTER TABLE users ADD COLUMN permissions TEXT NOT NULL DEFAULT '[]'", "ALTER TABLE users ADD COLUMN invited_by TEXT"] as $migration) {
+            try { $db->exec($migration); } catch (\Throwable) {}
+        }
         foreach (['ALTER TABLE projects ADD COLUMN blocked_reason TEXT', 'ALTER TABLE projects ADD COLUMN blocked_at TEXT', 'ALTER TABLE projects ADD COLUMN archived_at TEXT'] as $migration) {
             try { $db->exec($migration); } catch (\Throwable) {}
         }

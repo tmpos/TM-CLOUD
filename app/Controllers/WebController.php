@@ -538,6 +538,32 @@ final class WebController
             Http::flash('success', 'Device blocked.');
             Flight::redirect("/projects/$uid?tab=licenses");
         }));
+        Flight::route('GET /users', fn () => $this->page(fn () => $this->usersPage()));
+        Flight::route('POST /users', fn () => $this->action(function (array $in): void {
+            $user = $this->auth->create(
+                (string) ($in['name'] ?? ''), (string) ($in['email'] ?? ''), (string) ($in['password'] ?? ''),
+                (string) ($in['role'] ?? 'limited'), isset($in['permissions']) ? (array) $in['permissions'] : [],
+                (string) (Auth::user()['email'] ?? '')
+            );
+            Http::flash('success', 'Usuario invitado: ' . $user['email']);
+            Flight::redirect('/users');
+        }));
+        Flight::route('POST /users/@uid/update', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $this->auth->updateAccess($uid, (string) ($in['role'] ?? 'limited'), isset($in['permissions']) ? (array) $in['permissions'] : []);
+            Http::flash('success', 'Permisos actualizados.');
+            Flight::redirect('/users');
+        }));
+        Flight::route('POST /users/@uid/reset-password', fn (string $uid) => $this->action(function (array $in) use ($uid): void {
+            $this->auth->resetPassword($uid, (string) ($in['password'] ?? ''));
+            Http::flash('success', 'Contrasena actualizada.');
+            Flight::redirect('/users');
+        }));
+        Flight::route('POST /users/@uid/delete', fn (string $uid) => $this->action(function () use ($uid): void {
+            if ($uid === (string) (Auth::user()['uid'] ?? '')) throw new \RuntimeException('No puedes eliminar tu propio usuario.');
+            $this->auth->delete($uid);
+            Http::flash('success', 'Usuario eliminado.');
+            Flight::redirect('/users');
+        }));
         Flight::route('GET /onboarding-links', fn () => $this->page(fn () => $this->onboardingLinksPage()));
         Flight::route('POST /onboarding-links', fn () => $this->action(function () : void {
             $link = $this->onboarding->create(Auth::user()['email'] ?? 'admin');
@@ -793,6 +819,14 @@ final class WebController
         ]);
     }
 
+    private function usersPage(): void
+    {
+        View::render('users', [
+            'title' => 'Usuarios del panel', 'users' => $this->auth->all(), 'components' => Auth::COMPONENTS,
+            'currentUid' => Auth::user()['uid'] ?? '', 'flashes' => Http::flashes(),
+        ]);
+    }
+
     private function onboardingLinksPage(): void
     {
         $newLink = $_SESSION['_new_onboarding_link'] ?? null;
@@ -1005,6 +1039,50 @@ final class WebController
         readfile($backup['file_path']);
     }
 
+    /** Maps a request path to the "component" a limited user must have in their permission list. Null = ungated (login/logout, unknown paths). */
+    private function componentForPath(string $path): ?string
+    {
+        $path = '/' . ltrim((string) parse_url($path, PHP_URL_PATH), '/');
+        return match (true) {
+            str_starts_with($path, '/dashboard') || str_starts_with($path, '/projects') => 'projects',
+            str_starts_with($path, '/system-apps') => 'sistemas_web',
+            str_starts_with($path, '/api-docs') => 'api_docs',
+            str_starts_with($path, '/backups') => 'backups',
+            str_starts_with($path, '/storage') => 'storage',
+            str_starts_with($path, '/space-usage') => 'space_usage',
+            str_starts_with($path, '/apk-files') => 'apk_files',
+            str_starts_with($path, '/mail-settings') => 'mail_settings',
+            str_starts_with($path, '/licenses') => 'licenses',
+            str_starts_with($path, '/onboarding-links') => 'onboarding_links',
+            str_starts_with($path, '/users') => '__admin_only__',
+            default => null,
+        };
+    }
+
+    private function authorizedForCurrentPath(): bool
+    {
+        $component = $this->componentForPath((string) ($_SERVER['REQUEST_URI'] ?? '/'));
+        if ($component === null) return true;
+        if ($component === '__admin_only__') return Auth::isAdmin();
+        return Auth::hasComponent($component);
+    }
+
+    /** Where to send a limited user instead of a page they can't reach (denied access, or a generic error redirect). */
+    private function firstAllowedRoute(): string
+    {
+        if (Auth::isAdmin()) return '/dashboard';
+        $routes = [
+            'projects' => '/dashboard', 'sistemas_web' => '/system-apps', 'api_docs' => '/api-docs',
+            'backups' => '/backups', 'storage' => '/storage', 'space_usage' => '/space-usage',
+            'apk_files' => '/apk-files', 'mail_settings' => '/mail-settings', 'licenses' => '/licenses',
+            'onboarding_links' => '/onboarding-links',
+        ];
+        foreach ((array) (Auth::user()['permissions'] ?? []) as $permission) {
+            if (isset($routes[$permission])) return $routes[$permission];
+        }
+        return '/';
+    }
+
     private function page(callable $callback): void
     {
         if (!$this->installer->installed()) {
@@ -1016,11 +1094,16 @@ final class WebController
             Flight::redirect('/');
             return;
         }
+        if (!$this->authorizedForCurrentPath()) {
+            Http::flash('error', 'No tienes permiso para acceder a esta seccion.');
+            Flight::redirect($this->firstAllowedRoute());
+            return;
+        }
         try {
             $callback();
         } catch (\Throwable $e) {
             Http::flash('error', $this->config['debug'] ? $e->getMessage() . ' at ' . $e->getFile() . ':' . $e->getLine() : $e->getMessage());
-            Flight::redirect('/dashboard');
+            Flight::redirect($this->firstAllowedRoute());
         }
     }
 
@@ -1029,6 +1112,9 @@ final class WebController
         try {
             if ($requiresAuth && !Auth::check()) {
                 throw new \RuntimeException('Your session expired.');
+            }
+            if ($requiresAuth && !$this->authorizedForCurrentPath()) {
+                throw new \RuntimeException('No tienes permiso para esta seccion.');
             }
             $input = Http::input();
             Csrf::verify($input['_csrf'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null));

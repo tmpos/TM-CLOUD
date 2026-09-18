@@ -29,21 +29,27 @@ $flashes = $flashes ?? [];
             <div><strong class="block text-white">TMPBase</strong><span class="text-xs text-slate-500">Private backend platform</span></div>
         </div>
         <nav class="space-y-1 p-4 text-sm">
+            <?php if (Auth::hasComponent('projects')): ?>
             <a href="/dashboard" class="nav-link">Dashboard</a>
             <a href="/dashboard#projects" class="nav-link">Projects</a>
             <a href="/dashboard#activity" class="nav-link">Activity</a>
             <a href="/sistema" class="nav-link">Sistema TMPOS</a>
-            <a href="/system-apps" class="nav-link">Sistemas web</a>
+            <?php endif; ?>
+            <?php if (Auth::hasComponent('sistemas_web')): ?><a href="/system-apps" class="nav-link">Sistemas web</a><?php endif; ?>
             <div class="px-3 pb-2 pt-6 text-xs font-semibold uppercase tracking-widest text-slate-600">Workspace</div>
-            <a href="/api-docs" class="nav-link">API Docs</a>
-            <a href="/backups" class="nav-link">Backups</a>
-            <a href="/storage" class="nav-link">Storage</a>
-            <a href="/space-usage" class="nav-link">Uso de espacio</a>
-            <a href="/apk-files" class="nav-link">Archivos APK</a>
-            <a href="/mail-settings" class="nav-link">Correo OTP</a>
-            <a href="/licenses" class="nav-link">Licenses</a>
-            <a href="/onboarding-links" class="nav-link">Enlaces de registro</a>
-            <a href="/projects/trash" class="nav-link">Papelera</a>
+            <?php if (Auth::hasComponent('api_docs')): ?><a href="/api-docs" class="nav-link">API Docs</a><?php endif; ?>
+            <?php if (Auth::hasComponent('backups')): ?><a href="/backups" class="nav-link">Backups</a><?php endif; ?>
+            <?php if (Auth::hasComponent('storage')): ?><a href="/storage" class="nav-link">Storage</a><?php endif; ?>
+            <?php if (Auth::hasComponent('space_usage')): ?><a href="/space-usage" class="nav-link">Uso de espacio</a><?php endif; ?>
+            <?php if (Auth::hasComponent('apk_files')): ?><a href="/apk-files" class="nav-link">Archivos APK</a><?php endif; ?>
+            <?php if (Auth::hasComponent('mail_settings')): ?><a href="/mail-settings" class="nav-link">Correo OTP</a><?php endif; ?>
+            <?php if (Auth::hasComponent('licenses')): ?><a href="/licenses" class="nav-link">Licenses</a><?php endif; ?>
+            <?php if (Auth::hasComponent('onboarding_links')): ?><a href="/onboarding-links" class="nav-link">Enlaces de registro</a><?php endif; ?>
+            <?php if (Auth::hasComponent('projects')): ?><a href="/projects/trash" class="nav-link">Papelera</a><?php endif; ?>
+            <?php if (Auth::isAdmin()): ?>
+            <div class="px-3 pb-2 pt-6 text-xs font-semibold uppercase tracking-widest text-slate-600">Administracion</div>
+            <a href="/users" class="nav-link">Usuarios</a>
+            <?php endif; ?>
         </nav>
         <div class="absolute inset-x-4 bottom-4 rounded-xl border border-line bg-panel p-3 text-xs text-slate-400">
             Signed in as <strong class="mt-1 block truncate text-slate-200"><?= e(Auth::user()['email'] ?? '') ?></strong>
@@ -54,7 +60,7 @@ $flashes = $flashes ?? [];
         <header class="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-line bg-ink/90 px-4 backdrop-blur md:px-8">
             <button class="rounded-lg border border-line p-2 lg:hidden" data-sidebar-toggle>Menu</button>
             <div><h1 class="font-semibold text-white"><?= e($title ?? 'TMPBase') ?></h1></div>
-            <a href="/dashboard#new-project" class="btn-primary">New project</a>
+            <?php if (Auth::hasComponent('projects')): ?><a href="/dashboard#new-project" class="btn-primary">New project</a><?php endif; ?>
         </header>
         <div class="mx-auto max-w-[1600px] p-4 md:p-8">
 <?php endif; ?>
