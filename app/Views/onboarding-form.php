@@ -22,7 +22,7 @@ $done = $result !== null;
 <h1>Empresa registrada</h1>
 <div class="notice">Tu empresa <strong><?= $escape($result['project']['name'] ?? '') ?></strong> quedo creada. Usa esta licencia para activar TMPOS en tu equipo:</div>
 <label><span class="field-label">Clave de licencia</span><div class="key-box"><input type="text" readonly value="<?= $escape($result['license_key'] ?? '') ?>" id="license-key" aria-label="Clave de licencia"><button type="button" style="width:auto;margin-top:0" onclick="navigator.clipboard.writeText(document.getElementById('license-key').value)">Copiar</button></div></label>
-<p class="muted">Guarda esta clave; no volvera a mostrarse desde este enlace. Descarga TMPOS e ingresa la clave para comenzar a facturar.</p>
+<p class="muted">Tambien te enviamos estos datos y el enlace de tu sistema por correo. Guarda esta clave; no volvera a mostrarse desde este enlace. Descarga TMPOS e ingresa la clave para comenzar a facturar.</p>
 <?php else: ?>
 <h1>Registra tu empresa</h1>
 <p class="muted">Completa estos datos para crear tu sistema TMPOS. Este enlace es de un solo uso.</p>
@@ -33,7 +33,7 @@ $done = $result !== null;
 <label><span class="field-label">RNC</span><input type="text" name="rnc" maxlength="50"></label>
 <label><span class="field-label">Encargado</span><input type="text" name="encargado" maxlength="100" autocomplete="name"></label>
 <label><span class="field-label">Telefono</span><input type="tel" name="telefono" maxlength="50" autocomplete="tel"></label>
-<label><span class="field-label">Email</span><input type="email" name="email" maxlength="150" autocomplete="email"></label>
+<label><span class="field-label">Email</span><input type="email" name="email" maxlength="150" required autocomplete="email"></label>
 </div>
 <label><span class="field-label">Direccion</span><input type="text" name="direccion" maxlength="255" autocomplete="street-address"></label>
 <label><span class="field-label">Logo (opcional)</span><input type="file" name="logo" accept="image/png,image/jpeg,image/webp,image/gif"></label>

@@ -10,7 +10,7 @@ use RuntimeException;
 
 final class MailService
 {
-    private const TEMPLATES = ['test', 'otp', 'invoice', 'weekly_summary', 'cash_closing', 'license', 'system_event', 'storefront_order'];
+    private const TEMPLATES = ['test', 'otp', 'invoice', 'weekly_summary', 'cash_closing', 'license', 'system_event', 'storefront_order', 'onboarding_welcome'];
 
     public function __construct(private PDO $db, private array $config, private LogService $logs, private string $storage)
     {
@@ -304,6 +304,9 @@ final class MailService
         if ($template === 'storefront_order') {
             return $this->renderStorefrontOrder($data);
         }
+        if ($template === 'onboarding_welcome') {
+            return $this->renderOnboardingWelcome($data);
+        }
 
         $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $company = $escape($data['company_name'] ?? 'TMPBase');
@@ -413,6 +416,45 @@ final class MailService
             . "\nTotal: " . $money($data['total'] ?? 0)
             . "\nEntrega: " . $delivery . "\nPago: " . $payment
             . ($actionUrl !== '' ? "\n\n" . $actionUrl : '');
+        return [$subject, $html, $text];
+    }
+
+    private function renderOnboardingWelcome(array $data): array
+    {
+        $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $company = trim((string) ($data['company_name'] ?? 'tu empresa')) ?: 'tu empresa';
+        $subject = 'Bienvenido a TMPOS, ' . $company;
+
+        $rows = [
+            'Empresa' => $data['company_name'] ?? '',
+            'RNC' => $data['rnc'] ?? '',
+            'Encargado' => $data['encargado'] ?? '',
+            'Clave de licencia' => $data['license_key'] ?? '',
+        ];
+        $rowsHtml = '';
+        $rowsText = [];
+        foreach ($rows as $label => $value) {
+            if (trim((string) $value) === '') continue;
+            $rowsHtml .= '<tr><td style="padding:10px 0;color:#64748b;border-bottom:1px solid #e2e8f0">' . $escape($label) . '</td><td style="padding:10px 0;text-align:right;font-weight:700;color:#0f172a;border-bottom:1px solid #e2e8f0">' . $escape($value) . '</td></tr>';
+            $rowsText[] = $label . ': ' . $value;
+        }
+
+        $systemUrl = trim((string) ($data['system_url'] ?? ''));
+        $action = filter_var($systemUrl, FILTER_VALIDATE_URL)
+            ? '<div style="margin-top:26px;text-align:center"><a href="' . $escape($systemUrl) . '" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;font-weight:700;padding:13px 26px;border-radius:10px">Abrir mi sistema</a></div>'
+            : '';
+
+        $html = '<!doctype html><html><body style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a"><div style="max-width:640px;margin:auto;background:#fff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,.08)">'
+            . '<div style="padding:32px;background:linear-gradient(135deg,#0f172a,#0f766e);color:#fff"><div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#99f6e4">TMPOS</div><h1 style="margin:9px 0 7px;font-size:26px">¡Gracias por suscribirte, ' . $escape($company) . '!</h1><div style="color:#e2e8f0">Tu sistema ya esta listo para usarse.</div></div>'
+            . '<div style="padding:30px"><p style="margin:0 0 20px;color:#475569;line-height:1.7">Creamos tu empresa en TMPOS con la estructura completa del sistema: facturacion, inventario, clientes, caja y reportes, lista para configurar a tu manera. Guarda estos datos en un lugar seguro.</p>'
+            . '<table style="width:100%;border-collapse:collapse">' . $rowsHtml . '</table>'
+            . $action
+            . '<p style="margin:20px 0 0;color:#475569;line-height:1.7">Al ingresar por primera vez usa el usuario <strong>Administrador</strong> con el PIN <strong>1234</strong> y cambialo de inmediato desde Usuarios.</p>'
+            . '<p style="margin:26px 0 0;padding-top:20px;border-top:1px solid #e2e8f0;text-align:center;color:#94a3b8;font-size:12px">Si no solicitaste este registro, ignora este mensaje.</p></div></div></body></html>';
+
+        $text = $subject . "\n\nCreamos tu empresa en TMPOS, lista para usarse.\n\n" . implode("\n", $rowsText)
+            . ($systemUrl !== '' ? "\n\nEnlace del sistema: " . $systemUrl : '')
+            . "\n\nUsuario inicial: Administrador / PIN 1234 (cambialo despues de ingresar).";
         return [$subject, $html, $text];
     }
 

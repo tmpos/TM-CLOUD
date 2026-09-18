@@ -87,7 +87,7 @@ final class App
         $migrations = new MigrationService($db, $config['storage']);
         $alerts = new AlertService($db, $config, $projects, $metrics, $backups, $mail, $logs);
         $support = new SupportService($db, $config);
-        $onboarding = new ClientOnboardingService($db, $config, $logs, $projects, $schema, $storage, $licenses);
+        $onboarding = new ClientOnboardingService($db, $config, $logs, $projects, $schema, $storage, $licenses, $mail);
 
         (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge, $pdf, $functions, $metrics, $migrations, $mail, $apkFiles, $systemApps, $realtime, $support, $onboarding))->register();
         (new PortalController($config, $portalAuth, $projects, $schema, $records, $pdf, $sharedDocuments, $keys))->register();

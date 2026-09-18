@@ -26,6 +26,7 @@ final class ClientOnboardingService
         private SchemaService $schema,
         private StorageService $storage,
         private LicenseService $licenses,
+        private MailService $mail,
     ) {
     }
 
@@ -77,8 +78,8 @@ final class ClientOnboardingService
         $email = mb_substr(trim((string) ($company['email'] ?? '')), 0, 150);
         $encargado = mb_substr(trim((string) ($company['encargado'] ?? '')), 0, 100);
         $rnc = mb_substr(trim((string) ($company['rnc'] ?? '')), 0, 50);
-        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            throw new InvalidArgumentException('El correo no es valido.');
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidArgumentException('Indique un correo valido; ahi se enviaran los datos de acceso.');
         }
 
         $claim = $this->db->prepare("UPDATE onboarding_links SET status='claimed' WHERE uid = ? AND status = 'pending'");
@@ -130,7 +131,25 @@ final class ClientOnboardingService
         }
 
         $this->logs->write('onboarding.completed', (string) $project['uid'], 'empresa', (string) $project['uid'], null, ['onboarding_uid' => $link['uid']]);
+        $this->sendWelcomeEmail($project, $email, $name, $rnc, $encargado, (string) $license['license_key']);
         return ['project' => $project, 'license_key' => $license['license_key']];
+    }
+
+    /** Best-effort: the client already has a working project/license even if this fails (SMTP not configured, etc). */
+    private function sendWelcomeEmail(array $project, string $email, string $name, string $rnc, string $encargado, string $licenseKey): void
+    {
+        try {
+            $job = $this->mail->queue((string) $project['uid'], 'onboarding_welcome', $email, [
+                'company_name' => $name,
+                'rnc' => $rnc,
+                'encargado' => $encargado,
+                'license_key' => $licenseKey,
+                'system_url' => rtrim((string) $this->config['url'], '/') . '/sistema/' . $project['slug'],
+            ]);
+            $this->mail->deliver((string) $project['uid'], (string) $job['uid']);
+        } catch (\Throwable $e) {
+            $this->logs->write('onboarding.welcome_mail_failed', (string) $project['uid'], 'empresa', (string) $project['uid'], null, ['error' => $e->getMessage()]);
+        }
     }
 
     /** Copies every business table (and its indexes) from the reference project so a new client starts with the same structure, empty except for empresa/usuarios. */
