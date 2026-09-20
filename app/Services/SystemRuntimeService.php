@@ -57,7 +57,7 @@ final class SystemRuntimeService
 
     public function isWrite(string $action, array $input): bool
     {
-        if (in_array($action, ['db/insert', 'db/update', 'db/delete', 'config/set'], true)) return true;
+        if (in_array($action, ['db/insert', 'db/update', 'db/delete', 'db/deleteAll', 'config/set'], true)) return true;
         if ($action !== 'invoke') return false;
         $channel = (string) ($input['channel'] ?? '');
         if (str_starts_with($channel, 'db:get') || in_array($channel, [
@@ -85,6 +85,7 @@ final class SystemRuntimeService
             'db/insert' => $this->insert($db, $project, $input, $actor),
             'db/update' => $this->update($db, $project, $input, $actor),
             'db/delete' => $this->delete($db, $project, $input, $actor),
+            'db/deleteAll' => $this->deleteAll($db, $project, $input, $actor),
             'db/bitacoraList' => $this->bitacora($db, (int) ($input['limite'] ?? 1000)),
             'db/bitacoraDeleteAll' => $this->clearBitacora($db),
             'config/get' => $this->configGet($db, (string) ($input['clave'] ?? '')),
@@ -186,6 +187,30 @@ final class SystemRuntimeService
         $this->logs->write('system.record.deleted', $project['uid'], $tableName, (string) ($old['uid'] ?? $id), $old, ['actor' => $actor['email'] ?? '']);
         $this->webhooks->dispatch('record.deleted', $project, $tableName, $old);
         return ['success' => true];
+    }
+
+    private function deleteAll(PDO $db, array $project, array $input, array $actor): array
+    {
+        $tableName = strtolower(trim((string) ($input['tabla'] ?? '')));
+        if ($tableName !== 'accesorios') throw new InvalidArgumentException('Tabla no autorizada para borrado total.');
+        $identity = strtolower(trim((string) ($input['usuario'] ?? '')));
+        if (!$this->isSupportUser($db, $identity)) throw new RuntimeException('Solo Soporte puede borrar todos los accesorios.', 403);
+        $deleted = (int) $db->query('SELECT COUNT(*) FROM accesorios')->fetchColumn();
+        $this->schema->truncate($project, $tableName);
+        $this->audit($db, $tableName, 0, 'DELETE_ALL', ['email' => $identity], ['cantidad' => $deleted], null);
+        $this->webhooks->dispatch('table.truncated', $project, $tableName, null);
+        return ['success' => true, 'data' => ['deleted' => $deleted]];
+    }
+
+    private function isSupportUser(PDO $db, string $identity): bool
+    {
+        if ($identity === '') return false;
+        $stmt = $db->prepare('SELECT * FROM usuarios WHERE LOWER(TRIM(usuario))=? OR LOWER(TRIM(email))=? OR LOWER(TRIM(nombre))=? LIMIT 1');
+        $stmt->execute([$identity, $identity, $identity]);
+        $user = $stmt->fetch();
+        $active = $user && in_array(strtoupper(trim((string) ($user['estado'] ?? ''))), ['ACTIVADO', 'ACTIVO'], true);
+        $roles = array_map(fn (mixed $value): string => strtolower(trim((string) $value)), [$user['rol'] ?? '', $user['nivel_seguridad'] ?? '']);
+        return $active && in_array('soporte', $roles, true);
     }
 
     private function invoke(PDO $db, array $project, string $channel, array $args, array $actor): mixed

@@ -375,6 +375,16 @@ final class ApiController
                     $changes[$table] = ['updated' => [], 'deleted' => $items];
                 }
             }
+            // Un truncate se representa una sola vez por tabla. Los clientes
+            // deben vaciar su copia local con un DELETE atomico antes de aplicar
+            // las filas creadas/actualizadas posteriormente.
+            foreach ($this->logs->truncatedSince($p['uid'], $since) as $table => $truncatedAt) {
+                if (!isset($changes[$table])) {
+                    $changes[$table] = ['updated' => [], 'deleted' => []];
+                }
+                $changes[$table]['truncated'] = true;
+                $changes[$table]['truncated_at'] = $truncatedAt;
+            }
             Flight::json([
                 'changes' => $changes,
                 'server_time' => Support::now(),

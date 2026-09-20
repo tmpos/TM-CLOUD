@@ -100,6 +100,25 @@ final class LogService
         return $grouped;
     }
 
+    public function truncatedSince(string $projectUid, string $since): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT table_name, MAX(created_at) AS truncated_at FROM project_logs
+             WHERE project_uid = ? AND action = ? AND created_at >= ?
+             GROUP BY table_name'
+        );
+        $stmt->execute([$projectUid, 'table.truncated', $since]);
+        $truncated = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $table = (string) ($row['table_name'] ?? '');
+            if ($table === '') {
+                continue;
+            }
+            $truncated[$table] = (string) ($row['truncated_at'] ?? '');
+        }
+        return $truncated;
+    }
+
     public function recent(?string $projectUid = null, int $limit = 50): array
     {
         if ($projectUid) {
