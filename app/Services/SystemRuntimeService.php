@@ -57,7 +57,7 @@ final class SystemRuntimeService
 
     public function isWrite(string $action, array $input): bool
     {
-        if (in_array($action, ['db/insert', 'db/update', 'db/delete', 'db/deleteAll', 'config/set'], true)) return true;
+        if (in_array($action, ['db/insert', 'db/insertMany', 'db/update', 'db/delete', 'db/deleteAll', 'config/set'], true)) return true;
         if ($action !== 'invoke') return false;
         $channel = (string) ($input['channel'] ?? '');
         if (str_starts_with($channel, 'db:get') || in_array($channel, [
@@ -83,6 +83,7 @@ final class SystemRuntimeService
             'db/getModified' => $this->getModified($db, $input),
             'db/getById' => $this->getById($db, $input),
             'db/insert' => $this->insert($db, $project, $input, $actor),
+            'db/insertMany' => $this->insertMany($db, $project, $input, $actor),
             'db/update' => $this->update($db, $project, $input, $actor),
             'db/delete' => $this->delete($db, $project, $input, $actor),
             'db/deleteAll' => $this->deleteAll($db, $project, $input, $actor),
@@ -154,6 +155,33 @@ final class SystemRuntimeService
         $this->logs->write('system.record.created', $project['uid'], $tableName, (string) ($data['uid'] ?? $id), null, ['actor' => $actor['email'] ?? '', 'id' => $id]);
         $this->webhooks->dispatch('record.created', $project, $tableName, $this->row($db, $table, $id));
         return ['success' => true, 'data' => ['id' => $id, 'uid' => $data['uid'] ?? null]];
+    }
+
+    private function insertMany(PDO $db, array $project, array $input, array $actor): array
+    {
+        $tableName = (string) ($input['tabla'] ?? '');
+        $rows = array_values((array) ($input['rows'] ?? []));
+        if (!$rows) return ['success' => true, 'data' => ['inserted' => 0]];
+        if (count($rows) > 1000) throw new InvalidArgumentException('Cada lote admite un maximo de 1000 registros.');
+        foreach ($rows as $row) {
+            if (!is_array($row) || !$row) throw new InvalidArgumentException('El lote contiene un registro vacio o no valido.');
+        }
+
+        $this->table($db, $tableName);
+        $this->ensureAccessoryCommissionColumns($db, $tableName);
+        $db->beginTransaction();
+        try {
+            $inserted = 0;
+            foreach ($rows as $row) {
+                $this->insert($db, $project, ['tabla' => $tableName, 'data' => $row], $actor);
+                $inserted++;
+            }
+            $db->commit();
+            return ['success' => true, 'data' => ['inserted' => $inserted]];
+        } catch (\Throwable $error) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $error;
+        }
     }
 
     private function update(PDO $db, array $project, array $input, array $actor): array
