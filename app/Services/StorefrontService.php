@@ -81,6 +81,7 @@ final class StorefrontService
             Support::identifier($catalogTable, 'catalog table');
             $this->schema->columns($this->projects->find($projectUid), $catalogTable);
         }
+        $catalogSettings = $this->validateCatalogSettings($projectUid, $input, $store);
         $fields = [
             'slug' => $slug,
             'enabled' => isset($input['enabled']) ? 1 : 0,
@@ -146,6 +147,8 @@ final class StorefrontService
                 ? strtoupper((string) ($input['currency'] ?? 'DOP'))
                 : 'DOP',
             'catalog_table' => $catalogTable !== '' ? $catalogTable : null,
+            'show_prices' => $catalogSettings['show_prices'],
+            'warehouse_uid' => $catalogSettings['warehouse_uid'],
             'updated_at' => Support::now(),
         ];
         $assignments = implode(',', array_map(static fn (string $field): string => "$field=:$field", array_keys($fields)));
@@ -161,8 +164,102 @@ final class StorefrontService
         return $this->findForProject($projectUid);
     }
 
-    public function catalog(array $store, string $search = '', string $category = '', array $filters = []): array
+    public function warehousesForProject(string $projectUid): array
     {
+        return self::warehouseOptions($this->schema->connection($this->projects->findActive($projectUid)));
+    }
+
+    public function warehouseForStore(array $store): ?array
+    {
+        return self::selectedWarehouse($this->schema->connection($this->projects->findActive((string) $store['project_uid'])), $store);
+    }
+
+    public static function warehouseOptions(PDO $db): array
+    {
+        $columns = array_column($db->query('PRAGMA table_info("empresa")')->fetchAll(), 'name');
+        if (!in_array('id', $columns, true)) return [];
+        $warehouses = [];
+        foreach ($db->query('SELECT * FROM "empresa" ORDER BY id ASC')->fetchAll() as $row) {
+            $uid = trim((string) ($row['uid'] ?? ''));
+            $warehouses[] = [
+                'uid' => $uid !== '' ? $uid : 'id:' . $row['id'],
+                'id' => (int) (($row['almacen_id'] ?? 0) ?: $row['id']),
+                'name' => trim((string) ($row['nombre'] ?? '')) ?: 'Almacén ' . $row['id'],
+                'first' => $warehouses === [],
+            ];
+        }
+        return $warehouses;
+    }
+
+    public static function selectedWarehouse(PDO $db, array $store): ?array
+    {
+        $options = self::warehouseOptions($db);
+        $selected = trim((string) ($store['warehouse_uid'] ?? ''));
+        if ($selected === '') return $options[0] ?? null;
+        foreach ($options as $option) {
+            if ($option['uid'] === $selected) return $option;
+        }
+        // A deleted warehouse must never silently expose another warehouse's inventory.
+        return ['uid' => $selected, 'id' => -1, 'first' => false, 'missing' => true];
+    }
+
+    public static function warehouseCondition(array $columns, ?array $warehouse): array
+    {
+        if ($warehouse === null) return ['1=1', []];
+        if (!empty($warehouse['missing'])) return ['1=0', []];
+        $hasUid = in_array('almacen_uid', $columns, true);
+        $hasId = in_array('almacen_id', $columns, true);
+        if (!$hasUid && !$hasId) return ['1=1', []];
+        $fallback = $warehouse['first'] ? '1=1' : '1=0';
+        $parameters = [];
+        if ($hasId) {
+            $fallback = '(CAST(COALESCE("almacen_id",0) AS INTEGER)=?'
+                . ($warehouse['first'] ? ' OR CAST(COALESCE("almacen_id",0) AS INTEGER)=0' : '') . ')';
+            $parameters[] = $warehouse['id'];
+        }
+        if ($hasUid) {
+            $fallback = "(TRIM(COALESCE(\"almacen_uid\",''))=? OR (TRIM(COALESCE(\"almacen_uid\",''))='' AND " . $fallback . '))';
+            array_unshift($parameters, $warehouse['uid']);
+        }
+        return [$fallback, $parameters];
+    }
+
+    private function validateCatalogSettings(string $projectUid, array $input, array $store): array
+    {
+        $warehouseUid = trim((string) ($input['warehouse_uid'] ?? $store['warehouse_uid'] ?? ''));
+        if ($warehouseUid !== '' && !in_array($warehouseUid, array_column($this->warehousesForProject($projectUid), 'uid'), true)) {
+            throw new \InvalidArgumentException('Selecciona un almacén válido de esta tienda.');
+        }
+        return [
+            'show_prices' => array_key_exists('show_prices', $input) ? (int) ((string) $input['show_prices'] === '1') : (int) ($store['show_prices'] ?? 1),
+            'warehouse_uid' => $warehouseUid !== '' ? $warehouseUid : null,
+        ];
+    }
+
+    public function updateCatalogSettings(string $projectUid, array $input): array
+    {
+        $store = $this->findForProject($projectUid);
+        $settings = $this->validateCatalogSettings($projectUid, $input, $store);
+        $this->db->prepare('UPDATE storefronts SET show_prices=?,warehouse_uid=?,updated_at=? WHERE project_uid=?')
+            ->execute([$settings['show_prices'], $settings['warehouse_uid'], Support::now(), $projectUid]);
+        return $this->findForProject($projectUid);
+    }
+
+    private function publicProduct(array $product, array $store, bool $internal): array
+    {
+        if (!$internal && !(int) ($store['show_prices'] ?? 1)) {
+            $product['price'] = null;
+            $product['compare_price'] = null;
+        }
+        return $product;
+    }
+
+    public function catalog(array $store, string $search = '', string $category = '', array $filters = [], bool $internal = false): array
+    {
+        if (!$internal && !(int) ($store['show_prices'] ?? 1)) {
+            unset($filters['min_price'], $filters['max_price']);
+            if (str_starts_with((string) ($filters['sort'] ?? ''), 'price_')) $filters['sort'] = 'newest';
+        }
         $sources = $this->catalogSources($store);
         if ($sources === []) {
             return ['table' => null, 'products' => [], 'categories' => [], 'brands' => []];
@@ -181,7 +278,7 @@ final class StorefrontService
         $brandNeedle = mb_strtolower(trim((string) ($filters['brand'] ?? '')));
         foreach ($sources as $source) {
             ['project' => $project] = $source;
-            ['rows' => $rows, 'map' => $map] = $this->catalogRows($source);
+            ['rows' => $rows, 'map' => $map] = $this->catalogRows($source, $store);
             foreach ($rows as $row) {
                 if (!$this->isPublicProduct($row, $map['active'])) {
                     continue;
@@ -218,7 +315,7 @@ final class StorefrontService
                 if ($availability === 'out_of_stock' && $product['available']) {
                     continue;
                 }
-                $products[] = $product;
+                $products[] = $this->publicProduct($product, $store, $internal);
             }
         }
         natcasesort($categories);
@@ -243,7 +340,7 @@ final class StorefrontService
         ];
     }
 
-    public function productDetail(array $store, string $uid): array
+    public function productDetail(array $store, string $uid, bool $internal = false): array
     {
         if (!preg_match('/^[A-Za-z0-9_-]{3,100}$/', $uid)) {
             throw new RuntimeException('Producto no disponible.', 404);
@@ -252,7 +349,7 @@ final class StorefrontService
         $table = null;
         foreach ($this->catalogSources($store) as $source) {
             ['project' => $project] = $source;
-            ['rows' => $rows, 'map' => $map] = $this->catalogRows($source);
+            ['rows' => $rows, 'map' => $map] = $this->catalogRows($source, $store);
             foreach ($rows as $row) {
                 if ((string) ($row['uid'] ?? '') !== $uid || !$this->isPublicProduct($row, $map['active'])) {
                     continue;
@@ -266,7 +363,7 @@ final class StorefrontService
             throw new RuntimeException('Producto no disponible.', 404);
         }
         $related = array_values(array_filter(
-            $this->catalog($store)['products'],
+            $this->catalog($store, '', '', [], $internal)['products'],
             static fn (array $item): bool => $item['uid'] !== $uid
         ));
         usort($related, static function (array $left, array $right) use ($product): int {
@@ -274,7 +371,7 @@ final class StorefrontService
             $rightMatch = $product['category'] !== '' && mb_strtolower($right['category']) === mb_strtolower($product['category']);
             return (int) $rightMatch <=> (int) $leftMatch;
         });
-        return ['table' => $table, 'product' => $product, 'related' => array_slice($related, 0, 4)];
+        return ['table' => $table, 'product' => $this->publicProduct($product, $store, $internal), 'related' => array_slice($related, 0, 4)];
     }
 
     public function locateInvoice(array $store, string $number, string $verification): array
@@ -995,11 +1092,15 @@ final class StorefrontService
         return array_values($sources);
     }
 
-    private function catalogRows(array $source): array
+    private function catalogRows(array $source, array $store): array
     {
         ['project' => $project, 'table' => $table, 'map' => $map] = $source;
         $db = $this->schema->connection($project);
-        $rows = $db->query('SELECT * FROM ' . Support::quoteIdentifier($table) . ' ORDER BY id DESC LIMIT 500')->fetchAll();
+        $warehouse = self::selectedWarehouse($db, $store);
+        [$where, $parameters] = self::warehouseCondition($map['columns'], $warehouse);
+        $query = $db->prepare('SELECT * FROM ' . Support::quoteIdentifier($table) . ' WHERE ' . $where . ' ORDER BY id DESC LIMIT 500');
+        $query->execute($parameters);
+        $rows = $query->fetchAll();
         [$rows, $hasOnlineImages] = $this->withOnlineProductImages($db, $table, $rows);
         if ($hasOnlineImages) {
             array_unshift($map['image_columns'], '_tmpos_images');
@@ -1034,7 +1135,7 @@ final class StorefrontService
             unset($row);
         }
         if ($tableKey === 'telefonos') {
-            $inventory = $this->phoneInventory($db);
+            $inventory = $this->phoneInventory($db, $warehouse);
             $brandNames = $this->lookupNames($db, 'marcas');
             $phoneImageColumn = $this->firstColumn(
                 $map['columns'],
@@ -1078,7 +1179,7 @@ final class StorefrontService
             unset($row);
         }
         if ($tableKey === 'electrodomesticos') {
-            $inventory = $this->applianceInventory($db);
+            $inventory = $this->applianceInventory($db, $warehouse);
             $applianceImageColumn = $this->firstColumn(
                 $map['columns'],
                 ['imagen', 'imagen_url', 'image', 'image_url', 'foto', 'foto_url']
@@ -1178,13 +1279,16 @@ final class StorefrontService
         return $lookup;
     }
 
-    private function phoneInventory(PDO $db): array
+    private function phoneInventory(PDO $db, ?array $warehouse): array
     {
         $columns = array_column($db->query('PRAGMA table_info("imei")')->fetchAll(), 'name');
         if ($columns === []) {
             return [];
         }
-        $rows = $db->query('SELECT * FROM "imei" ORDER BY id DESC LIMIT 5000')->fetchAll();
+        [$where, $parameters] = self::warehouseCondition($columns, $warehouse);
+        $query = $db->prepare('SELECT * FROM "imei" WHERE ' . $where . ' ORDER BY id DESC LIMIT 5000');
+        $query->execute($parameters);
+        $rows = $query->fetchAll();
         $inventory = [];
         foreach ($rows as $row) {
             $state = mb_strtoupper(trim((string) ($row['estado'] ?? 'DISPONIBLE')));
@@ -1215,13 +1319,16 @@ final class StorefrontService
         return $inventory;
     }
 
-    private function applianceInventory(PDO $db): array
+    private function applianceInventory(PDO $db, ?array $warehouse): array
     {
         $columns = array_column($db->query('PRAGMA table_info("serial")')->fetchAll(), 'name');
         if ($columns === []) {
             return [];
         }
-        $rows = $db->query('SELECT * FROM "serial" ORDER BY id DESC LIMIT 5000')->fetchAll();
+        [$where, $parameters] = self::warehouseCondition($columns, $warehouse);
+        $query = $db->prepare('SELECT * FROM "serial" WHERE ' . $where . ' ORDER BY id DESC LIMIT 5000');
+        $query->execute($parameters);
+        $rows = $query->fetchAll();
         $inventory = [];
         foreach ($rows as $row) {
             $state = mb_strtoupper(trim((string) ($row['estado'] ?? 'DISPONIBLE')));

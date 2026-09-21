@@ -60,6 +60,7 @@ final class StorefrontInventoryService
         try {
             foreach ($items as $item) {
                 $metadata = $this->metadata($item['metadata'] ?? []);
+                $warehouse = array_key_exists('warehouse', $metadata) ? $metadata['warehouse'] : StorefrontService::selectedWarehouse($db, $store);
                 $kind = strtolower(trim((string) ($metadata['kind'] ?? $item['kind'] ?? 'product')));
                 $table = trim((string) ($metadata['source_table'] ?? $item['source_table'] ?? ''));
                 $productUid = trim((string) ($item['product_uid'] ?? $item['product']['uid'] ?? ''));
@@ -84,6 +85,7 @@ final class StorefrontInventoryService
                             $productName,
                             $explicit,
                             $order,
+                            $warehouse,
                         );
                     }
                     continue;
@@ -92,7 +94,7 @@ final class StorefrontInventoryService
                 if ($table === '') {
                     continue;
                 }
-                $movement = $this->decreaseProduct($db, $table, $productUid, $productName, $quantity);
+                $movement = $this->decreaseProduct($db, $table, $productUid, $productName, $quantity, $warehouse);
                 if ($movement !== null) {
                     $movements[] = $movement;
                 }
@@ -194,6 +196,7 @@ final class StorefrontInventoryService
         string $productName,
         string $requestedImei,
         array $order,
+        ?array $warehouse,
     ): array {
         if (!$this->tableExists($db, 'telefonos') || !$this->tableExists($db, 'imei')) {
             throw new RuntimeException('El inventario de teléfonos e IMEI no está disponible.');
@@ -230,7 +233,9 @@ final class StorefrontInventoryService
             throw new RuntimeException('No se puede relacionar el IMEI con el modelo ' . $productName . '.');
         }
 
-        $where = '(' . implode(' OR ', $relations) . ')';
+        [$warehouseWhere, $warehouseParameters] = StorefrontService::warehouseCondition($columns, $warehouse);
+        $where = '(' . implode(' OR ', $relations) . ') AND ' . $warehouseWhere;
+        array_push($parameters, ...$warehouseParameters);
         if ($requestedImei !== '') {
             $where .= ' AND REPLACE(REPLACE(CAST(' . Support::quoteIdentifier($imeiColumn) . " AS TEXT),'-',''),' ','')=?";
             $parameters[] = $this->normalizeImei($requestedImei);
@@ -305,6 +310,7 @@ final class StorefrontInventoryService
         string $productUid,
         string $productName,
         int $quantity,
+        ?array $warehouse,
     ): ?array {
         $table = Support::identifier($table, 'table name');
         if (!$this->tableExists($db, $table)) {
@@ -315,11 +321,12 @@ final class StorefrontInventoryService
         if ($stockColumn === null || !in_array('uid', $columns, true)) {
             return null;
         }
+        [$warehouseWhere, $warehouseParameters] = StorefrontService::warehouseCondition($columns, $warehouse);
         $select = $db->prepare(
             'SELECT ' . Support::quoteIdentifier($stockColumn)
-            . ' FROM ' . Support::quoteIdentifier($table) . ' WHERE uid=? LIMIT 1'
+            . ' FROM ' . Support::quoteIdentifier($table) . ' WHERE uid=? AND ' . $warehouseWhere . ' LIMIT 1'
         );
-        $select->execute([$productUid]);
+        $select->execute([$productUid, ...$warehouseParameters]);
         $before = $select->fetchColumn();
         if ($before === false) {
             throw new RuntimeException('No se encontró ' . $productName . ' en el inventario.');

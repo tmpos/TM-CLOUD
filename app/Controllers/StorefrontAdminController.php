@@ -43,6 +43,7 @@ final class StorefrontAdminController
         Flight::route('GET /@store/admin/products', fn ($store) => $this->page((string) $store, 'products'));
         Flight::route('GET /@store/admin/customers', fn ($store) => $this->page((string) $store, 'customers'));
         Flight::route('GET /@store/admin/operations', fn ($store) => $this->page((string) $store, 'operations'));
+        Flight::route('POST /@store/admin/web/settings', fn ($store) => $this->saveCatalogSettings((string) $store));
         Flight::route('GET /@store/admin/web', fn ($store) => $this->page((string) $store, 'web'));
 
         // Rutas anteriores: solo redirigen al proyecto activo para no romper marcadores.
@@ -112,7 +113,7 @@ final class StorefrontAdminController
         try {
             $store = $this->admins->currentStore($storeSlug);
             $catalog = in_array($section, ['dashboard', 'pos', 'products', 'operations', 'web'], true)
-                ? $this->storefronts->catalog($store)
+                ? $this->storefronts->catalog($store, '', '', [], true)
                 : ['products' => [], 'categories' => [], 'brands' => []];
             $orders = in_array($section, ['dashboard', 'orders', 'dispatched', 'delivered', 'operations'], true)
                 ? $this->admins->orders($store, in_array($section, ['orders', 'dispatched', 'delivered'], true) ? 500 : 12)
@@ -135,6 +136,7 @@ final class StorefrontAdminController
                 'catalog' => $catalog,
                 'orders' => $orders,
                 'customers' => $customers,
+                'warehouses' => $section === 'web' ? $this->storefronts->warehousesForProject((string) $store['project_uid']) : [],
                 'metrics' => $this->admins->metrics($store),
                 'flashes' => Http::flashes(),
                 'adminBase' => $this->base($store),
@@ -142,6 +144,30 @@ final class StorefrontAdminController
         } catch (\Throwable $e) {
             $this->renderLogin($e->getMessage(), '', $storeSlug);
         }
+    }
+
+    private function saveCatalogSettings(string $storeSlug): void
+    {
+        if (!$this->admins->check()) {
+            Flight::redirect('/' . rawurlencode($storeSlug) . '/admin/');
+            return;
+        }
+        try {
+            $input = Http::input();
+            Csrf::verify($input['_csrf'] ?? null);
+            $store = $this->admins->currentStore($storeSlug);
+            if (!in_array($store['admin_role'] ?? '', ['owner', 'manager'], true)) {
+                throw new \RuntimeException('Solo el propietario o gerente puede configurar la tienda.', 403);
+            }
+            $this->storefronts->updateCatalogSettings((string) $store['project_uid'], [
+                'show_prices' => $input['show_prices'] ?? '0',
+                'warehouse_uid' => $input['warehouse_uid'] ?? '',
+            ]);
+            Http::flash('admin_success', 'Precios y almacén de la tienda actualizados.');
+        } catch (\Throwable $e) {
+            Http::flash('admin_error', $e->getMessage());
+        }
+        Flight::redirect('/' . rawurlencode($storeSlug) . '/admin/web');
     }
 
     private function posSale(string $storeSlug): void

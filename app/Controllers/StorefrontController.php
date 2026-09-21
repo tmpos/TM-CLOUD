@@ -128,6 +128,10 @@ final class StorefrontController
     {
         try {
             $store = $this->storefronts->findBySlug($slug);
+            if (!(int) ($store['show_prices'] ?? 1)) {
+                Flight::redirect('/store/' . rawurlencode($store['slug']) . '#productos');
+                return;
+            }
             header('Cache-Control: private, no-cache');
             $this->renderPublic('storefront-cart', compact('store'));
         } catch (\Throwable $e) {
@@ -139,6 +143,10 @@ final class StorefrontController
     {
         try {
             $store = $this->storefronts->findBySlug($slug);
+            if (!(int) ($store['show_prices'] ?? 1)) {
+                Flight::redirect('/store/' . rawurlencode($store['slug']) . '#productos');
+                return;
+            }
             $checkoutCustomer = $this->checkoutCustomerForStore($store);
             if ($checkoutCustomer === null) {
                 $_SESSION['storefront_customer_next'][$store['uid']] = '/store/' . rawurlencode($store['slug']) . '/checkout';
@@ -733,6 +741,7 @@ final class StorefrontController
                 'project' => $this->projects->find($projectUid),
                 'store' => $this->storefronts->findForProject($projectUid),
                 'tables' => $this->storefronts->tablesForProject($projectUid),
+                'warehouses' => $this->storefronts->warehousesForProject($projectUid),
                 'paymentMethods' => $this->commerce->adminMethods($projectUid),
                 'orders' => $this->commerce->recentOrders($projectUid),
                 'flashes' => Http::flashes(),
@@ -789,7 +798,7 @@ final class StorefrontController
             'hero_overlay_opacity', 'hero_carousel_interval',
             'promo_enabled', 'promo_title', 'promo_text', 'promo_image', 'promo_link',
             'show_featured', 'show_new_arrivals', 'show_brands',
-            'announcement_text', 'show_stock', 'show_sku', 'footer_text', 'instagram_url',
+            'announcement_text', 'show_prices', 'show_stock', 'show_sku', 'footer_text', 'instagram_url',
             'facebook_url', 'pickup_enabled', 'delivery_enabled', 'shipping_enabled',
             'flat_shipping_cost', 'free_shipping_threshold', 'checkout_terms_url',
         ]));

@@ -107,6 +107,9 @@ final class StorefrontCommerceService
 
     public function createOrder(array $store, array $input): array
     {
+        if (!(int) ($store['show_prices'] ?? 1)) {
+            throw new InvalidArgumentException('Esta tienda funciona como catálogo. Contacta al negocio para consultar precios.');
+        }
         $name = mb_substr(trim((string) ($input['customer_name'] ?? '')), 0, 120);
         $phone = mb_substr(trim((string) ($input['customer_phone'] ?? '')), 0, 40);
         $email = mb_strtolower(trim((string) ($input['customer_email'] ?? '')));
@@ -200,6 +203,7 @@ final class StorefrontCommerceService
                     Support::json([
                         'kind' => $product['kind'] ?? 'product',
                         'source_table' => $item['sourceTable'],
+                        'warehouse' => $this->storefronts->warehouseForStore($store),
                     ]),
                     $now,
                 ]);

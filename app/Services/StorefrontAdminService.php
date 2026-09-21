@@ -211,7 +211,7 @@ final class StorefrontAdminService
         );
         $stmt->execute([$today, $today, $store['uid']]);
         $metrics = $stmt->fetch() ?: [];
-        $catalog = $this->storefronts->catalog($store);
+        $catalog = $this->storefronts->catalog($store, '', '', [], true);
         $products = $catalog['products'];
         $metrics['products'] = count($products);
         $metrics['available_products'] = count(array_filter($products, static fn (array $p): bool => (bool) $p['available']));
@@ -282,7 +282,7 @@ final class StorefrontAdminService
         foreach ($requestedItems as $requested) {
             if (!is_array($requested)) continue;
             $quantity = max(1, min(999, (int) ($requested['quantity'] ?? 1)));
-            $detail = $this->storefronts->productDetail($store, (string) ($requested['uid'] ?? ''));
+            $detail = $this->storefronts->productDetail($store, (string) ($requested['uid'] ?? ''), true);
             $product = $detail['product'];
             $sourceTable = (string) $detail['table'];
             if (!$product['available'] || $product['price'] === null) {
@@ -301,6 +301,7 @@ final class StorefrontAdminService
                 'imei' => $imei,
                 'kind' => $product['kind'] ?? 'product',
                 'source_table' => $sourceTable,
+                'warehouse' => $this->storefronts->warehouseForStore($store),
             ];
             $items[] = compact('product', 'sourceTable', 'quantity', 'unitPrice', 'lineTotal', 'note', 'imei', 'metadata');
         }
