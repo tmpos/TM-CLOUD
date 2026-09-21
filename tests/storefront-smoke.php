@@ -145,6 +145,28 @@ try {
     check(!$storefronts->customerIsVerified($store, $registeredCustomer), 'A new customer was active before OTP verification.');
     $storefronts->verifyCustomerOtp($store, $registeredCustomer, $activation['otp']);
     check($storefronts->customerIsVerified($store, $registeredCustomer), 'OTP verification did not activate the customer.');
+    // Expiry comparisons must use the same UTC format, regardless of PHP timezone.
+    $originalTimezone = date_default_timezone_get();
+    date_default_timezone_set('America/Santo_Domingo');
+    try {
+        $activation = $storefronts->beginCustomerVerification($store, $registeredCustomer);
+        $db->prepare('UPDATE storefront_customer_verifications SET expires_at=? WHERE storefront_uid=? AND customer_uid=?')
+            ->execute([gmdate('Y-m-d H:i:s', time() - 1), $store['uid'], $registeredCustomer['uid']]);
+        $expiredRejected = false;
+        try { $storefronts->verifyCustomerOtp($store, $registeredCustomer, $activation['otp']); }
+        catch (InvalidArgumentException $error) { $expiredRejected = str_contains($error->getMessage(), 'expir'); }
+        check($expiredRejected, 'An expired OTP was accepted.');
+        check(!$storefronts->customerIsVerified($store, $registeredCustomer), 'Expired OTP activated the customer.');
+        $activation = $storefronts->beginCustomerVerification($store, $registeredCustomer);
+        $wrongOtp = $activation['otp'] === '100000' ? '100001' : '100000';
+        $wrongRejected = false;
+        try { $storefronts->verifyCustomerOtp($store, $registeredCustomer, $wrongOtp); }
+        catch (InvalidArgumentException $error) { $wrongRejected = str_contains($error->getMessage(), 'no es correcto'); }
+        check($wrongRejected, 'A wrong OTP was accepted or incorrectly reported as expired.');
+        $storefronts->verifyCustomerOtp($store, $registeredCustomer, $activation['otp']);
+        check($storefronts->customerIsVerified($store, $registeredCustomer), 'Resent OTP failed in a non-UTC timezone.');
+    } finally { date_default_timezone_set($originalTimezone); }
+
     check(
         $storefronts->locateCustomerByDocument($store, '40212345678')['customer']['uid'] === $registeredCustomer['uid'],
         'A registered customer could not sign in with the document.'

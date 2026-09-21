@@ -556,7 +556,8 @@ final class StorefrontService
         if ((int) ($verification['attempts'] ?? 0) >= 5) {
             throw new \InvalidArgumentException('Superaste el límite de intentos. Solicita un código nuevo.');
         }
-        if ((string) ($verification['expires_at'] ?? '') < Support::now()) {
+        // expires_at is stored as a UTC SQL datetime, unlike Support::now() (ISO 8601).
+        if ((string) ($verification['expires_at'] ?? '') <= gmdate('Y-m-d H:i:s')) {
             throw new \InvalidArgumentException('El código expiró. Solicita uno nuevo.');
         }
         $this->db->prepare(
