@@ -795,7 +795,7 @@ final class ApiController
                     'almacen_id' => $request['almacen_id'],
                     'almacen_uid' => $request['almacen_uid'],
                 ], 'printed-qr', true);
-                header('Location: ' . $individual['url'], true, 303);
+                Flight::redirect($individual['url'], 303);
                 return;
             }
             if ($submit) {
