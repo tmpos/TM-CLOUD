@@ -35,6 +35,7 @@ use App\Services\PdfService;
 use App\Services\MailService;
 use App\Services\SharedDocumentService;
 use App\Services\InvoiceSignatureService;
+use App\Services\CustomerRegistrationService;
 use App\Services\StorefrontService;
 use App\Services\StorefrontCommerceService;
 use App\Services\StorefrontAdminService;
@@ -75,13 +76,14 @@ final class App
         $pdf = new PdfService($schema, $licenses, $signatures);
         $mail = new MailService($db, $config['mail'] ?? [], $logs, $config['storage']);
         $sharedDocuments = new SharedDocumentService($db, $config, $logs);
+        $customerRegistrations = new CustomerRegistrationService($db, $config, $logs, $schema, $records, $webhooks);
         $storefronts = new StorefrontService($db, $config, $projects, $schema, $records);
         $credentialCipher = new CredentialCipher($config['storage']);
         $storefrontCommerce = new StorefrontCommerceService($db, $config, $credentialCipher, $storefronts, $logs);
         $storefrontInventory = new StorefrontInventoryService($projects, $schema, $logs, $webhooks);
         $storefrontAdmins = new StorefrontAdminService($db, $storefronts, $storefrontInventory, $logs);
         $portalAuth = new PortalAuth($db);
-        $systemRuntime = new SystemRuntimeService($schema, $logs, $sharedDocuments, $webhooks, $signatures);
+        $systemRuntime = new SystemRuntimeService($schema, $logs, $sharedDocuments, $webhooks, $signatures, $customerRegistrations);
         $projectSql = new ProjectSqlApiService($schema, $logs);
         $metrics = new MetricsService($db);
         $migrations = new MigrationService($db, $config['storage']);
@@ -94,7 +96,7 @@ final class App
         (new SystemController($portalAuth, $projects, $systemRuntime, $keys, $systemApps, $projectSql, $storage))->register();
         (new StorefrontController($config, $storefronts, $projects, $records, $pdf, $keys, $storefrontCommerce, $mail))->register();
         (new StorefrontAdminController($storefrontAdmins, $storefronts, $projects, $pdf, $mail))->register();
-        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics, $mail, $sharedDocuments, $pdf, $portalAuth, $projectSql, $signatures, $systemRuntime, $onboarding))->register();
+        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics, $mail, $sharedDocuments, $pdf, $portalAuth, $projectSql, $signatures, $customerRegistrations, $systemRuntime, $onboarding))->register();
     }
 
     private static function ensureStorage(string $storage): void

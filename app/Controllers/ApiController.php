@@ -13,6 +13,7 @@ use App\Services\MetricsService;
 use App\Services\MailService;
 use App\Services\SharedDocumentService;
 use App\Services\InvoiceSignatureService;
+use App\Services\CustomerRegistrationService;
 use App\Services\PdfService;
 use App\Core\PortalAuth;
 use App\Services\LogService;
@@ -48,6 +49,7 @@ final class ApiController
         private PortalAuth $portalAuth,
         private ProjectSqlApiService $projectSql,
         private InvoiceSignatureService $signatures,
+        private CustomerRegistrationService $customerRegistrations,
         private SystemRuntimeService $runtime,
         private ClientOnboardingService $onboarding,
     ) {
@@ -282,6 +284,16 @@ final class ApiController
                 Http::error($e, $status);
             }
         });
+        Flight::route('POST /api/license/customer-registration-request', function (): void {
+            try {
+                $input = Http::input();
+                $project = $this->licensedProject($input, 'license-customer-registration-create');
+                Flight::json(['data' => $this->customerRegistrations->create($project, $input, 'licensed-device')], 201);
+            } catch (\Throwable $e) {
+                $status = in_array($e->getCode(), [403, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+                Http::error($e, $status);
+            }
+        });
         Flight::route('POST /api/@project/mail/send', fn ($project) => $this->runProject($project, true, function ($p): void {
             $input = Http::input();
             $job = $this->mail->queue(
@@ -328,6 +340,9 @@ final class ApiController
             $invoice = $this->records->find($p, 'facturas', (string) $uid);
             Flight::json(['data' => $this->signatures->status($p, $invoice, true)]);
         }));
+        Flight::route('POST /api/@project/customer-registration-request', fn ($project) => $this->runProject($project, true, function ($p): void {
+            Flight::json(['data' => $this->customerRegistrations->create($p, Http::input(), 'secret-api')], 201);
+        }));
         Flight::route('POST /api/@project/invoices/@uid/email', fn ($project, $uid) => $this->runProject($project, true, function ($p) use ($uid): void {
             $invoice = $this->records->find($p, 'facturas', $uid);
             $input = Http::input();
@@ -345,6 +360,8 @@ final class ApiController
         Flight::route('GET /sign/invoice/@token', fn ($token) => $this->serveSignaturePage((string) $token, false));
         Flight::route('POST /sign/invoice/@token', fn ($token) => $this->serveSignaturePage((string) $token, true));
         Flight::route('GET /sign/invoice/@token/preview', fn ($token) => $this->serveSignaturePreview((string) $token));
+        Flight::route('GET /register/customer/@token', fn ($token) => $this->serveCustomerRegistrationPage((string) $token, false));
+        Flight::route('POST /register/customer/@token', fn ($token) => $this->serveCustomerRegistrationPage((string) $token, true));
         Flight::route('GET /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, false));
         Flight::route('POST /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, true));
         Flight::route('GET /share/invoice/@token', function ($token): void {
@@ -745,6 +762,47 @@ final class ApiController
             if ($encoded === false || strlen($encoded) > 524288) throw new \InvalidArgumentException('La factura excede el tamano permitido.');
         }
         return [$project, $invoice];
+    }
+
+    private function licensedProject(array $input, string $rateKey): array
+    {
+        $licenseKey = trim((string) ($input['license_key'] ?? ''));
+        $deviceId = trim((string) ($input['device_id'] ?? ''));
+        $this->keys->rateLimitPublic($rateKey . ':' . hash('sha256', $licenseKey . ':' . $deviceId), 20);
+        if ($licenseKey === '' || $deviceId === '') throw new \InvalidArgumentException('license_key and device_id are required.');
+        $license = $this->licenses->findByKey($licenseKey);
+        if ($license['status'] !== 'active' || ($license['expires_at'] && $license['expires_at'] < date('Y-m-d H:i:s'))) throw new \RuntimeException('License is not active.', 403);
+        if (!$this->licenses->isDeviceAuthorized($license['uid'], $deviceId)) throw new \RuntimeException('Device is not authorized.', 403);
+        return $this->projects->findActive($license['project_uid']);
+    }
+
+    private function serveCustomerRegistrationPage(string $token, bool $submit): void
+    {
+        header('Cache-Control: no-store');
+        header('Referrer-Policy: no-referrer');
+        header('X-Robots-Tag: noindex, nofollow');
+        header('Content-Type: text/html; charset=UTF-8');
+        $request = null;
+        $project = null;
+        $customer = null;
+        $error = '';
+        try {
+            $this->keys->rateLimitPublic('register-customer:' . hash('sha256', $token), 30);
+            $request = $this->customerRegistrations->resolve($token);
+            $project = $this->projects->findActive((string) $request['project_uid']);
+            if ($submit) {
+                $customer = $this->customerRegistrations->complete($request, $project, Http::input());
+                $request = $this->customerRegistrations->resolve($token);
+            }
+        } catch (\Throwable $e) {
+            http_response_code(in_array($e->getCode(), [409, 429], true) ? $e->getCode() : ($submit && $request && $project ? 422 : 404));
+            if (!$request || !$project) {
+                echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Enlace no disponible</title><body><main style="max-width:600px;margin:50px auto;font:18px system-ui"><h1>Enlace de registro no disponible</h1><p>Solicite un enlace nuevo a la empresa.</p></main></body></html>';
+                return;
+            }
+            $error = $e->getMessage();
+        }
+        require dirname(__DIR__) . '/Views/customer-registration.php';
     }
 
     private function signingDocument(string $token): array

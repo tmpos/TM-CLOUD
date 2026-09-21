@@ -23,7 +23,7 @@ final class SystemRuntimeService
 
     private ?DateTimeZone $requestTimezone = null;
 
-    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks, private InvoiceSignatureService $signatures)
+    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks, private InvoiceSignatureService $signatures, private CustomerRegistrationService $customerRegistrations)
     {
     }
 
@@ -249,6 +249,10 @@ final class SystemRuntimeService
         if ($channel === 'facturas:crearEnlacePdf') return $this->shareInvoice($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'facturas:crearEnlaceFirma') return $this->signatureInvoice($db, $project, (array) ($args[0] ?? []), true);
         if ($channel === 'facturas:obtenerFirma') return $this->signatureInvoice($db, $project, (array) ($args[0] ?? []), false);
+        if ($channel === 'clientes:crearEnlaceRegistro') return [
+            'success' => true,
+            'data' => $this->customerRegistrations->create($project, (array) ($args[0] ?? []), (string) ($actor['email'] ?? $actor['usuario'] ?? 'system')),
+        ];
         if ($channel === 'db:exec') return $this->executeSql($db, (string) ($args[0] ?? ''), true);
         if ($channel === 'consultaservidor') return $this->consultaServidor($db, $project, $args);
         if (in_array($channel, ['caja:getTurnoActivo', 'caja:getTurnoAbierto'], true)) return $this->turnoActivo($db, (string) ($args[0] ?? ''));

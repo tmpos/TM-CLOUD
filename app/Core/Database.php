@@ -283,6 +283,22 @@ CREATE TABLE IF NOT EXISTS invoice_signature_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_signature_record ON invoice_signature_requests(project_uid, record_uid, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_signature_signed_version ON invoice_signature_requests(project_uid, record_uid, invoice_hash) WHERE signed_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS customer_registration_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT UNIQUE NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    project_uid TEXT NOT NULL REFERENCES projects(uid) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','used')),
+    phone TEXT,
+    almacen_id INTEGER,
+    almacen_uid TEXT,
+    expires_at TEXT NOT NULL,
+    customer_uid TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_customer_registration_project ON customer_registration_requests(project_uid, status, created_at DESC);
 CREATE TABLE IF NOT EXISTS portal_users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     uid TEXT UNIQUE NOT NULL,
