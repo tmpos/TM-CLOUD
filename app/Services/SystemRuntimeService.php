@@ -192,10 +192,10 @@ final class SystemRuntimeService
     private function deleteAll(PDO $db, array $project, array $input, array $actor): array
     {
         $tableName = strtolower(trim((string) ($input['tabla'] ?? '')));
-        if ($tableName !== 'accesorios') throw new InvalidArgumentException('Tabla no autorizada para borrado total.');
+        if (!in_array($tableName, ['accesorios', 'telefonos'], true)) throw new InvalidArgumentException('Tabla no autorizada para borrado total.');
         $identity = strtolower(trim((string) ($input['usuario'] ?? '')));
-        if (!$this->isSupportUser($db, $identity)) throw new RuntimeException('Solo Soporte puede borrar todos los accesorios.', 403);
-        $deleted = (int) $db->query('SELECT COUNT(*) FROM accesorios')->fetchColumn();
+        if (!$this->isSupportUser($db, $identity)) throw new RuntimeException('Solo Soporte puede ejecutar el borrado total.', 403);
+        $deleted = (int) $db->query('SELECT COUNT(*) FROM ' . Support::quoteIdentifier($tableName))->fetchColumn();
         $this->schema->truncate($project, $tableName);
         $this->audit($db, $tableName, 0, 'DELETE_ALL', ['email' => $identity], ['cantidad' => $deleted], null);
         $this->webhooks->dispatch('table.truncated', $project, $tableName, null);
