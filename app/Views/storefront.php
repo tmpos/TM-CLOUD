@@ -189,5 +189,23 @@ sync();
 })();
 </script>
 <?php if($heroMode==='carousel'&&count($heroImages)>1): ?><script>(()=>{const hero=document.querySelector('[data-hero-carousel]'),slides=[...hero.querySelectorAll('[data-hero-slide]')],dots=[...hero.querySelectorAll('[data-hero-dot]')],delay=<?= (int)($store['hero_carousel_interval']??6000) ?>;let index=0,timer;function show(next){index=(next+slides.length)%slides.length;slides.forEach((slide,i)=>slide.classList.toggle('active',i===index));dots.forEach((dot,i)=>dot.classList.toggle('active',i===index))}function start(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;clearInterval(timer);timer=setInterval(()=>show(index+1),delay)}dots.forEach((dot,i)=>dot.onclick=()=>{show(i);start()});hero.addEventListener('mouseenter',()=>clearInterval(timer));hero.addEventListener('mouseleave',start);document.addEventListener('visibilitychange',()=>document.hidden?clearInterval(timer):start());start()})();</script><?php endif; ?>
+<style>
+.store-back-top{position:fixed;right:20px;bottom:24px;z-index:25;display:flex;align-items:center;gap:8px;min-height:46px;padding:0 16px;border:1px solid #ffffff50;border-radius:999px;background:var(--brand);color:#fff;font-family:inherit;font-size:14px;font-weight:700;box-shadow:0 4px 18px #0003;cursor:pointer}
+.store-back-top[hidden]{display:none}.store-back-top:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+@media(max-width:700px){.store-back-top{right:14px;bottom:calc(82px + env(safe-area-inset-bottom,0px))}}
+</style>
+<button type="button" class="store-back-top" data-back-top hidden aria-label="Volver al inicio de la p&aacute;gina"><span aria-hidden="true">&uarr;</span> Ir arriba</button>
+<script>
+(()=>{
+  const button=document.querySelector('[data-back-top]');
+  const update=()=>{button.hidden=window.scrollY<500};
+  window.addEventListener('scroll',update,{passive:true});
+  window.addEventListener('pageshow',update);
+  button.addEventListener('click',()=>{
+    window.scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+  });
+  update();
+})();
+</script>
 </body>
 </html>
