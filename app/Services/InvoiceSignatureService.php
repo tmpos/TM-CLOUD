@@ -17,7 +17,13 @@ final class InvoiceSignatureService
 {
     public const CONSENT = 'He revisado esta factura y acepto firmarla electrónicamente como constancia de recepción y conformidad.';
 
-    public function __construct(private PDO $db, private array $config, private LogService $logs, private SchemaService $schema) {}
+    public function __construct(
+        private PDO $db,
+        private array $config,
+        private LogService $logs,
+        private SchemaService $schema,
+        private ?RealtimeService $realtime = null,
+    ) {}
 
     public function create(array $project, array $invoice, ?string $expiresAt = null): array
     {
@@ -98,6 +104,13 @@ final class InvoiceSignatureService
             throw $e;
         }
         $this->logs->write('invoice.signed', (string) $request['project_uid'], 'facturas', (string) $request['record_uid'], null, ['request_uid' => $request['uid'], 'invoice_hash' => $request['invoice_hash'], 'signature_sha256' => hash('sha256', $png)]);
+        $this->realtime?->broadcast('invoice.signed', $project, 'facturas', [
+            'record_uid' => (string) $request['record_uid'],
+            'request_uid' => (string) $request['uid'],
+            'invoice_number' => (string) ($invoice['no_factura'] ?? $invoice['numero'] ?? $request['record_uid']),
+            'signer_name' => $name,
+            'signed_at' => $now,
+        ]);
         return ['status' => 'signed', 'signed_at' => $now, 'signer_name' => $name];
     }
 

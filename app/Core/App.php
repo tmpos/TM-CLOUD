@@ -71,7 +71,7 @@ final class App
         $installer = new InstallerService($config, $auth);
         $licenses = new LicenseService($db, $logs);
         $databaseBridge = new DatabaseBridgeService($db, $schema, $logs, $config);
-        $signatures = new InvoiceSignatureService($db, $config, $logs, $schema);
+        $signatures = new InvoiceSignatureService($db, $config, $logs, $schema, $realtime);
         $pdf = new PdfService($schema, $licenses, $signatures);
         $mail = new MailService($db, $config['mail'] ?? [], $logs, $config['storage']);
         $sharedDocuments = new SharedDocumentService($db, $config, $logs);
