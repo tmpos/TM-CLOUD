@@ -186,7 +186,7 @@ final class StorefrontService
                 if (!$this->isPublicProduct($row, $map['active'])) {
                     continue;
                 }
-                $product = $this->mapProduct($project['uid'], $row, $map);
+                $product = $this->mapProduct($project['uid'], $row, $map, false, (string) ($store['logo_url'] ?? ''));
                 if ($product === null) {
                     continue;
                 }
@@ -257,7 +257,7 @@ final class StorefrontService
                 if ((string) ($row['uid'] ?? '') !== $uid || !$this->isPublicProduct($row, $map['active'])) {
                     continue;
                 }
-                $product = $this->mapProduct($project['uid'], $row, $map, true);
+                $product = $this->mapProduct($project['uid'], $row, $map, true, (string) ($store['logo_url'] ?? ''));
                 $table = $source['table'];
                 break 2;
             }
@@ -1285,7 +1285,7 @@ final class StorefrontService
         return $store;
     }
 
-    private function mapProduct(string $projectUid, array $row, array $map, bool $withSpecifications = false): ?array
+    private function mapProduct(string $projectUid, array $row, array $map, bool $withSpecifications = false, string $fallbackImage = ''): ?array
     {
         $name = trim((string) ($row[$map['name']] ?? ''));
         $uid = trim((string) ($row['uid'] ?? ''));
@@ -1293,6 +1293,9 @@ final class StorefrontService
             return null;
         }
         $images = $this->productImages($projectUid, $row, $map['image_columns']);
+        if ($images === [] && trim($fallbackImage) !== '') {
+            $images = [$fallbackImage];
+        }
         $stock = $map['stock'] ? (float) ($row[$map['stock']] ?? 0) : null;
         $rawPrice = $map['price'] ? ($row[$map['price']] ?? null) : null;
         $rawComparePrice = $map['compare_price'] ? ($row[$map['compare_price']] ?? null) : null;
