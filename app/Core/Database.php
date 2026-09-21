@@ -608,6 +608,7 @@ SQL);
         foreach (['ALTER TABLE projects ADD COLUMN blocked_reason TEXT', 'ALTER TABLE projects ADD COLUMN blocked_at TEXT', 'ALTER TABLE projects ADD COLUMN archived_at TEXT'] as $migration) {
             try { $db->exec($migration); } catch (\Throwable) {}
         }
+        try { $db->exec("ALTER TABLE customer_registration_requests ADD COLUMN reusable INTEGER NOT NULL DEFAULT 0"); } catch (\Throwable) {}
         // Las claves API pertenecen al proyecto. Se eliminan las copias históricas de licencias.
         $db->exec("UPDATE licenses SET public_key = '', secret_key = '' WHERE COALESCE(public_key, '') <> '' OR COALESCE(secret_key, '') <> ''");
         $licenses = $db->query('SELECT uid, dispositivos, equipos_no_autorizados FROM licenses')->fetchAll();

@@ -20,10 +20,11 @@ final class CustomerRegistrationService
         private WebhookService $webhooks,
     ) {}
 
-    public function create(array $project, array $input, string $createdBy = ''): array
+    public function create(array $project, array $input, string $createdBy = '', bool $allowEmptyPhone = false): array
     {
+        $reusable = ($input['reusable'] ?? false) === true;
         $phone = self::phone((string) ($input['phone'] ?? $input['telefono'] ?? ''));
-        if ($phone === '') throw new InvalidArgumentException('Indique el numero de WhatsApp del cliente.');
+        if ($phone === '' && !$reusable && !$allowEmptyPhone) throw new InvalidArgumentException('Indique el numero de WhatsApp del cliente.');
         $baseUrl = rtrim((string) ($this->config['url'] ?? ''), '/');
         if (parse_url($baseUrl, PHP_URL_SCHEME) !== 'https' && !in_array(parse_url($baseUrl, PHP_URL_HOST), ['localhost', '127.0.0.1'], true)) {
             throw new RuntimeException('APP_URL debe usar HTTPS para crear enlaces de registro.');
@@ -32,18 +33,19 @@ final class CustomerRegistrationService
         $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
         $uid = Support::uid('crq_');
         $now = Support::now();
-        $expiresAt = gmdate('Y-m-d H:i:s', time() + 7 * 86400);
+        $expiresAt = $reusable ? '9999-12-31 23:59:59' : gmdate('Y-m-d H:i:s', time() + 7 * 86400);
         $almacenId = max(0, (int) ($input['almacen_id'] ?? 0));
         $almacenUid = substr(trim((string) ($input['almacen_uid'] ?? '')), 0, 120);
-        $this->db->prepare('INSERT INTO customer_registration_requests (uid,token_hash,project_uid,status,phone,almacen_id,almacen_uid,expires_at,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-            ->execute([$uid, hash('sha256', $token), $project['uid'], 'pending', $phone, $almacenId ?: null, $almacenUid ?: null, $expiresAt, substr(trim($createdBy), 0, 160), $now]);
+        $this->db->prepare('INSERT INTO customer_registration_requests (uid,token_hash,project_uid,status,phone,almacen_id,almacen_uid,expires_at,created_by,created_at,reusable) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+            ->execute([$uid, hash('sha256', $token), $project['uid'], 'pending', $phone, $almacenId ?: null, $almacenUid ?: null, $expiresAt, substr(trim($createdBy), 0, 160), $now, (int) $reusable]);
         $this->logs->write('customer.registration_requested', (string) $project['uid'], 'clientes', $uid, null, ['phone' => $phone, 'almacen_id' => $almacenId, 'almacen_uid' => $almacenUid]);
 
         return [
             'uid' => $uid,
             'url' => $baseUrl . '/register/customer/' . $token,
             'phone' => $phone,
-            'expires_at' => $expiresAt,
+            'expires_at' => $reusable ? null : $expiresAt,
+            'reusable' => $reusable,
             'status' => 'pending',
         ];
     }
@@ -62,6 +64,7 @@ final class CustomerRegistrationService
 
     public function complete(array $request, array $project, array $input): array
     {
+        if (!empty($request['reusable'])) throw new RuntimeException('Abra el QR para iniciar un registro individual.', 409);
         if (($request['status'] ?? '') === 'used') throw new RuntimeException('Este enlace ya fue utilizado.', 409);
         $name = mb_strtoupper(trim((string) ($input['nombre'] ?? '')), 'UTF-8');
         if (mb_strlen($name) < 2 || mb_strlen($name) > 160) throw new InvalidArgumentException('Indique un nombre valido (2 a 160 caracteres).');

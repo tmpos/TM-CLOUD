@@ -790,6 +790,14 @@ final class ApiController
             $this->keys->rateLimitPublic('register-customer:' . hash('sha256', $token), 30);
             $request = $this->customerRegistrations->resolve($token);
             $project = $this->projects->findActive((string) $request['project_uid']);
+            if (!$submit && !empty($request['reusable'])) {
+                $individual = $this->customerRegistrations->create($project, [
+                    'almacen_id' => $request['almacen_id'],
+                    'almacen_uid' => $request['almacen_uid'],
+                ], 'printed-qr', true);
+                header('Location: ' . $individual['url'], true, 303);
+                return;
+            }
             if ($submit) {
                 $customer = $this->customerRegistrations->complete($request, $project, Http::input());
                 $request = $this->customerRegistrations->resolve($token);
