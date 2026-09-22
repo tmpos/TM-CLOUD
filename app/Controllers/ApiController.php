@@ -873,7 +873,7 @@ final class ApiController
                 $request = $this->spaAppointments->resolve($token);
             }
         } catch (\Throwable $e) {
-            http_response_code(in_array($e->getCode(), [409, 429], true) ? $e->getCode() : ($submit && $request && $project ? 422 : 404));
+            Flight::response()->status(in_array($e->getCode(), [409, 429], true) ? $e->getCode() : ($submit && $request && $project ? 422 : 404));
             if (!$request || !$project) {
                 echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Enlace no disponible</title><body><main style="max-width:600px;margin:50px auto;font:18px system-ui"><h1>Enlace de cita no disponible</h1><p>Solicite un enlace nuevo a la empresa.</p></main></body></html>';
                 return;
@@ -904,11 +904,11 @@ final class ApiController
             }
         } catch (\Throwable $e) {
             if (!$project || !$settings || !$settings['enabled']) {
-                http_response_code(404);
+                Flight::response()->status(404);
                 echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pagina no disponible</title><body><main style="max-width:600px;margin:50px auto;font:18px system-ui"><h1>Esta pagina no esta disponible</h1></main></body></html>';
                 return;
             }
-            http_response_code(in_array($e->getCode(), [429], true) ? $e->getCode() : ($submit ? 422 : 404));
+            Flight::response()->status(in_array($e->getCode(), [429], true) ? $e->getCode() : ($submit ? 422 : 404));
             $error = $e->getMessage();
         }
         require dirname(__DIR__) . '/Views/spa-landing.php';
