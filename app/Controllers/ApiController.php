@@ -15,6 +15,7 @@ use App\Services\SharedDocumentService;
 use App\Services\InvoiceSignatureService;
 use App\Services\CustomerRegistrationService;
 use App\Services\SpaAppointmentService;
+use App\Services\SpaLandingService;
 use App\Services\PdfService;
 use App\Core\PortalAuth;
 use App\Services\LogService;
@@ -52,6 +53,7 @@ final class ApiController
         private InvoiceSignatureService $signatures,
         private CustomerRegistrationService $customerRegistrations,
         private SpaAppointmentService $spaAppointments,
+        private SpaLandingService $spaLanding,
         private SystemRuntimeService $runtime,
         private ClientOnboardingService $onboarding,
     ) {
@@ -306,6 +308,26 @@ final class ApiController
                 Http::error($e, $status);
             }
         });
+        Flight::route('POST /api/license/spa-landing-settings/get', function (): void {
+            try {
+                $input = Http::input();
+                $project = $this->licensedProject($input, 'license-spa-landing-get');
+                Flight::json(['data' => $this->spaLanding->get($project)]);
+            } catch (\Throwable $e) {
+                $status = in_array($e->getCode(), [403, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+                Http::error($e, $status);
+            }
+        });
+        Flight::route('POST /api/license/spa-landing-settings', function (): void {
+            try {
+                $input = Http::input();
+                $project = $this->licensedProject($input, 'license-spa-landing-save');
+                Flight::json(['data' => $this->spaLanding->save($project, $input)]);
+            } catch (\Throwable $e) {
+                $status = in_array($e->getCode(), [403, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+                Http::error($e, $status);
+            }
+        });
         Flight::route('POST /api/@project/mail/send', fn ($project) => $this->runProject($project, true, function ($p): void {
             $input = Http::input();
             $job = $this->mail->queue(
@@ -379,6 +401,8 @@ final class ApiController
         Flight::route('POST /register/customer/@token', fn ($token) => $this->serveCustomerRegistrationPage((string) $token, true));
         Flight::route('GET /register/spa/@token', fn ($token) => $this->serveSpaAppointmentPage((string) $token, false));
         Flight::route('POST /register/spa/@token', fn ($token) => $this->serveSpaAppointmentPage((string) $token, true));
+        Flight::route('GET /spa/@slug', fn ($slug) => $this->serveSpaLandingPage((string) $slug, false));
+        Flight::route('POST /spa/@slug', fn ($slug) => $this->serveSpaLandingPage((string) $slug, true));
         Flight::route('GET /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, false));
         Flight::route('POST /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, true));
         Flight::route('GET /share/invoice/@token', function ($token): void {
@@ -857,6 +881,37 @@ final class ApiController
             $error = $e->getMessage();
         }
         require dirname(__DIR__) . '/Views/spa-registration.php';
+    }
+
+    private function serveSpaLandingPage(string $slug, bool $submit): void
+    {
+        header('Referrer-Policy: no-referrer');
+        header('Content-Type: text/html; charset=UTF-8');
+        $project = null;
+        $settings = null;
+        $services = [];
+        $booked = false;
+        $error = '';
+        try {
+            $this->keys->rateLimitPublic('spa-landing:' . hash('sha256', $slug), 60);
+            $project = $this->projects->findActiveBySlug($slug);
+            $settings = $this->spaLanding->get($project);
+            if (!$settings['enabled']) throw new \RuntimeException('Esta pagina no esta disponible.', 404);
+            $services = $this->spaLanding->publicServices($project);
+            if ($submit) {
+                $this->spaLanding->book($project, Http::input());
+                $booked = true;
+            }
+        } catch (\Throwable $e) {
+            if (!$project || !$settings || !$settings['enabled']) {
+                http_response_code(404);
+                echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pagina no disponible</title><body><main style="max-width:600px;margin:50px auto;font:18px system-ui"><h1>Esta pagina no esta disponible</h1></main></body></html>';
+                return;
+            }
+            http_response_code(in_array($e->getCode(), [429], true) ? $e->getCode() : ($submit ? 422 : 404));
+            $error = $e->getMessage();
+        }
+        require dirname(__DIR__) . '/Views/spa-landing.php';
     }
 
     private function signingDocument(string $token): array

@@ -316,6 +316,28 @@ CREATE TABLE IF NOT EXISTS spa_appointment_requests (
     reusable INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_spa_appointment_project ON spa_appointment_requests(project_uid, status, created_at DESC);
+CREATE TABLE IF NOT EXISTS spa_landing_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT UNIQUE NOT NULL,
+    project_uid TEXT UNIQUE NOT NULL REFERENCES projects(uid) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    nombre TEXT NOT NULL DEFAULT '',
+    tagline TEXT NOT NULL DEFAULT '',
+    descripcion TEXT NOT NULL DEFAULT '',
+    telefono TEXT NOT NULL DEFAULT '',
+    whatsapp TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    direccion TEXT NOT NULL DEFAULT '',
+    horario TEXT NOT NULL DEFAULT '',
+    color_primario TEXT NOT NULL DEFAULT '#8347d9',
+    imagen_portada TEXT NOT NULL DEFAULT '',
+    galeria TEXT NOT NULL DEFAULT '[]',
+    instagram TEXT NOT NULL DEFAULT '',
+    facebook TEXT NOT NULL DEFAULT '',
+    tiktok TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS portal_users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     uid TEXT UNIQUE NOT NULL,
