@@ -299,6 +299,23 @@ CREATE TABLE IF NOT EXISTS customer_registration_requests (
     used_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_customer_registration_project ON customer_registration_requests(project_uid, status, created_at DESC);
+CREATE TABLE IF NOT EXISTS spa_appointment_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT UNIQUE NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    project_uid TEXT NOT NULL REFERENCES projects(uid) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','used')),
+    phone TEXT,
+    almacen_id INTEGER,
+    almacen_uid TEXT,
+    expires_at TEXT NOT NULL,
+    appointment_uid TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    used_at TEXT,
+    reusable INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_spa_appointment_project ON spa_appointment_requests(project_uid, status, created_at DESC);
 CREATE TABLE IF NOT EXISTS portal_users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     uid TEXT UNIQUE NOT NULL,

@@ -14,6 +14,7 @@ use App\Services\MailService;
 use App\Services\SharedDocumentService;
 use App\Services\InvoiceSignatureService;
 use App\Services\CustomerRegistrationService;
+use App\Services\SpaAppointmentService;
 use App\Services\PdfService;
 use App\Core\PortalAuth;
 use App\Services\LogService;
@@ -50,6 +51,7 @@ final class ApiController
         private ProjectSqlApiService $projectSql,
         private InvoiceSignatureService $signatures,
         private CustomerRegistrationService $customerRegistrations,
+        private SpaAppointmentService $spaAppointments,
         private SystemRuntimeService $runtime,
         private ClientOnboardingService $onboarding,
     ) {
@@ -294,6 +296,16 @@ final class ApiController
                 Http::error($e, $status);
             }
         });
+        Flight::route('POST /api/license/spa-appointment-request', function (): void {
+            try {
+                $input = Http::input();
+                $project = $this->licensedProject($input, 'license-spa-appointment-create');
+                Flight::json(['data' => $this->spaAppointments->create($project, $input, 'licensed-device')], 201);
+            } catch (\Throwable $e) {
+                $status = in_array($e->getCode(), [403, 423, 429], true) ? $e->getCode() : ($e instanceof \InvalidArgumentException ? 422 : 400);
+                Http::error($e, $status);
+            }
+        });
         Flight::route('POST /api/@project/mail/send', fn ($project) => $this->runProject($project, true, function ($p): void {
             $input = Http::input();
             $job = $this->mail->queue(
@@ -343,6 +355,9 @@ final class ApiController
         Flight::route('POST /api/@project/customer-registration-request', fn ($project) => $this->runProject($project, true, function ($p): void {
             Flight::json(['data' => $this->customerRegistrations->create($p, Http::input(), 'secret-api')], 201);
         }));
+        Flight::route('POST /api/@project/spa-appointment-request', fn ($project) => $this->runProject($project, true, function ($p): void {
+            Flight::json(['data' => $this->spaAppointments->create($p, Http::input(), 'secret-api')], 201);
+        }));
         Flight::route('POST /api/@project/invoices/@uid/email', fn ($project, $uid) => $this->runProject($project, true, function ($p) use ($uid): void {
             $invoice = $this->records->find($p, 'facturas', $uid);
             $input = Http::input();
@@ -362,6 +377,8 @@ final class ApiController
         Flight::route('GET /sign/invoice/@token/preview', fn ($token) => $this->serveSignaturePreview((string) $token));
         Flight::route('GET /register/customer/@token', fn ($token) => $this->serveCustomerRegistrationPage((string) $token, false));
         Flight::route('POST /register/customer/@token', fn ($token) => $this->serveCustomerRegistrationPage((string) $token, true));
+        Flight::route('GET /register/spa/@token', fn ($token) => $this->serveSpaAppointmentPage((string) $token, false));
+        Flight::route('POST /register/spa/@token', fn ($token) => $this->serveSpaAppointmentPage((string) $token, true));
         Flight::route('GET /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, false));
         Flight::route('POST /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, true));
         Flight::route('GET /share/invoice/@token', function ($token): void {
@@ -811,6 +828,35 @@ final class ApiController
             $error = $e->getMessage();
         }
         require dirname(__DIR__) . '/Views/customer-registration.php';
+    }
+
+    private function serveSpaAppointmentPage(string $token, bool $submit): void
+    {
+        header('Cache-Control: no-store');
+        header('Referrer-Policy: no-referrer');
+        header('X-Robots-Tag: noindex, nofollow');
+        header('Content-Type: text/html; charset=UTF-8');
+        $request = null;
+        $project = null;
+        $appointment = null;
+        $error = '';
+        try {
+            $this->keys->rateLimitPublic('register-spa:' . hash('sha256', $token), 30);
+            $request = $this->spaAppointments->resolve($token);
+            $project = $this->projects->findActive((string) $request['project_uid']);
+            if ($submit) {
+                $appointment = $this->spaAppointments->complete($request, $project, Http::input());
+                $request = $this->spaAppointments->resolve($token);
+            }
+        } catch (\Throwable $e) {
+            http_response_code(in_array($e->getCode(), [409, 429], true) ? $e->getCode() : ($submit && $request && $project ? 422 : 404));
+            if (!$request || !$project) {
+                echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Enlace no disponible</title><body><main style="max-width:600px;margin:50px auto;font:18px system-ui"><h1>Enlace de cita no disponible</h1><p>Solicite un enlace nuevo a la empresa.</p></main></body></html>';
+                return;
+            }
+            $error = $e->getMessage();
+        }
+        require dirname(__DIR__) . '/Views/spa-registration.php';
     }
 
     private function signingDocument(string $token): array

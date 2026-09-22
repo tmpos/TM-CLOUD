@@ -36,6 +36,7 @@ use App\Services\MailService;
 use App\Services\SharedDocumentService;
 use App\Services\InvoiceSignatureService;
 use App\Services\CustomerRegistrationService;
+use App\Services\SpaAppointmentService;
 use App\Services\StorefrontService;
 use App\Services\StorefrontCommerceService;
 use App\Services\StorefrontAdminService;
@@ -77,6 +78,7 @@ final class App
         $mail = new MailService($db, $config['mail'] ?? [], $logs, $config['storage']);
         $sharedDocuments = new SharedDocumentService($db, $config, $logs);
         $customerRegistrations = new CustomerRegistrationService($db, $config, $logs, $schema, $records, $webhooks);
+        $spaAppointments = new SpaAppointmentService($db, $config, $logs, $schema, $records, $webhooks);
         $storefronts = new StorefrontService($db, $config, $projects, $schema, $records);
         $credentialCipher = new CredentialCipher($config['storage']);
         $storefrontCommerce = new StorefrontCommerceService($db, $config, $credentialCipher, $storefronts, $logs);
@@ -96,7 +98,7 @@ final class App
         (new SystemController($portalAuth, $projects, $systemRuntime, $keys, $systemApps, $projectSql, $storage))->register();
         (new StorefrontController($config, $storefronts, $projects, $records, $pdf, $keys, $storefrontCommerce, $mail))->register();
         (new StorefrontAdminController($storefrontAdmins, $storefronts, $projects, $pdf, $mail))->register();
-        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics, $mail, $sharedDocuments, $pdf, $portalAuth, $projectSql, $signatures, $customerRegistrations, $systemRuntime, $onboarding))->register();
+        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics, $mail, $sharedDocuments, $pdf, $portalAuth, $projectSql, $signatures, $customerRegistrations, $spaAppointments, $systemRuntime, $onboarding))->register();
     }
 
     private static function ensureStorage(string $storage): void
