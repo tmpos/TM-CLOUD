@@ -12,7 +12,7 @@
 
 <dialog id="block-project-dialog" class="w-full max-w-md rounded-2xl border border-line bg-panel p-0 text-slate-200"><form class="p-6" method="post" action="/projects/<?= e($project['uid']) ?>/block"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><div class="mb-5 flex justify-between"><h3 class="text-lg font-semibold text-white">Bloquear proyecto</h3><button type="button" data-dialog-close>Close</button></div><label><span class="label">Reason</span><textarea class="input" name="reason" rows="3" placeholder="e.g. Payment overdue"></textarea></label><p class="mt-2 text-xs text-slate-500">API access and system login will be blocked until the project is unblocked.</p><button class="btn-danger mt-5 w-full">Bloquear proyecto</button></form></dialog>
 <nav class="mb-6 flex gap-6 overflow-x-auto border-b border-line">
-<?php foreach (['tables'=>'Tables','database'=>'MySQL Sync','sql'=>'SQL Editor','settings'=>'Configuracion','backups'=>'Backups','storage'=>'Storage','webhooks'=>'Webhooks','licenses'=>'Licenses','logs'=>'Logs','diagram'=>'Diagram','functions'=>'Functions','migrations'=>'Migrations','metrics'=>'Metrics'] as $key=>$label): ?>
+<?php foreach (['tables'=>'Tables','database'=>'MySQL Sync','sql'=>'SQL Editor','settings'=>'Configuracion','backups'=>'Backups','storage'=>'Storage','webhooks'=>'Webhooks','licenses'=>'Licenses','logs'=>'Logs','diagram'=>'Diagram','functions'=>'Functions','migrations'=>'Migrations','metrics'=>'Metrics','otp'=>'OTP'] as $key=>$label): ?>
     <a class="tab <?= $tab === $key ? 'active' : '' ?>" href="?tab=<?= e($key) ?>"><?= e($label) ?></a>
 <?php endforeach; ?>
     <a class="tab" href="/projects/<?= e($project['uid']) ?>/support">Soporte</a>
@@ -162,6 +162,8 @@ $storageCurl = implode("\n", [
 <?php require __DIR__ . '/project_migrations.php'; ?>
 <?php elseif ($tab === 'metrics'): ?>
 <?php require __DIR__ . '/project_metrics.php'; ?>
+<?php elseif ($tab === 'otp'): ?>
+<?php require __DIR__ . '/project_otp.php'; ?>
 <?php endif; ?>
 
 <dialog id="new-table-dialog" class="w-full max-w-md rounded-2xl border border-line bg-panel p-0 text-slate-200"><form class="p-6" method="post" action="/projects/<?= e($project['uid']) ?>/tables"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><div class="mb-5 flex justify-between"><h3 class="text-lg font-semibold text-white">Create table</h3><button type="button" data-dialog-close>Close</button></div><label><span class="label">Table name</span><input class="input" name="name" required pattern="[A-Za-z][A-Za-z0-9_]{0,62}" placeholder="customers"></label><p class="mt-2 text-xs text-slate-500">id, uid, created_at and updated_at are added automatically.</p><button class="btn-primary mt-5 w-full">Create table</button></form></dialog>

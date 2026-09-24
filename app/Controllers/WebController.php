@@ -29,6 +29,7 @@ use App\Services\MailService;
 use App\Services\WebhookService;
 use App\Services\DatabaseBridgeService;
 use App\Services\SupportService;
+use App\Services\ProjectOtpService;
 use App\Services\ClientOnboardingService;
 use Flight;
 use PDO;
@@ -462,6 +463,11 @@ final class WebController
         }));
         Flight::route('GET /projects/@uid/backups/@backup/download', fn (string $uid, string $backup) => $this->page(fn () => $this->downloadBackup($uid, $backup)));
         Flight::route('GET /projects/@uid/support', fn (string $uid) => $this->page(fn () => $this->supportPage($uid)));
+        // Polled by the OTP tab to refresh the rotating code; never cached.
+        Flight::route('GET /projects/@uid/otp', fn (string $uid) => $this->page(function () use ($uid): void {
+            header('Cache-Control: no-store');
+            Flight::json(['data' => $this->projectOtp($this->projects->find($uid))]);
+        }));
         Flight::route('POST /projects/@uid/support/token', fn (string $uid) => $this->action(function () use ($uid): void {
             $this->projects->findActive($uid);
             $issued = $this->support->issueToken($uid, (string) (Auth::user()['uid'] ?? ''));
@@ -728,6 +734,11 @@ final class WebController
         ]);
     }
 
+    private function projectOtp(array $project): array
+    {
+        return (new ProjectOtpService())->status($this->schema->connection($project), date('Y-m-d H:i:s'));
+    }
+
     private function supportPage(string $uid): void
     {
         $project = $this->projects->find($uid);
@@ -905,8 +916,16 @@ final class WebController
         };
         preg_match('/^\d+\.\d+\.\d+/', file_get_contents($this->config['root'] . '/composer.json'), $m);
 
+        $otp = null;
+        if ($tab === 'otp') {
+            $otp = $this->projectOtp($project);
+            // The project OTP is also the support sign-in code, so every view is logged.
+            $this->logs->write('project.otp_viewed', $uid, 'otp_config', ProjectOtpService::CONFIG_UID, null, ['actor' => Auth::user()['email'] ?? '']);
+        }
+
         View::render('project', [
             'title' => $project['name'], 'project' => $project, 'tables' => $allTables,
+            'otp' => $otp,
             'logs' => $this->logs->recent($uid, 100), 'backups' => $this->backups->all($uid),
             'files' => $this->storage->all($project), 'webhooks' => $this->webhooks->all($uid),
             'licenses' => $this->licenses->all($uid),

@@ -237,7 +237,8 @@ final class SystemController
     private function systemUser(array $project): ?array
     {
         $user = $_SESSION['system_project_users'][$project['uid']] ?? null;
-        return is_array($user) && !empty($user['id']) ? $user : null;
+        // Support-code sessions have no usuarios row (id 0) but are flagged.
+        return is_array($user) && (!empty($user['id']) || ($user['support_session'] ?? false) === true) ? $user : null;
     }
 
     private function safeUser(array $user): array
