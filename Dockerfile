@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     procps \
     sqlite3 \
+    nodejs \
     libzip-dev \
     libpq-dev \
     libsqlite3-dev \

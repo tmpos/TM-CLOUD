@@ -243,6 +243,7 @@ final class SystemRuntimeService
 
     private function invoke(PDO $db, array $project, string $channel, array $args, array $actor): mixed
     {
+        if (in_array($channel, ['gastos:guardarContable','gastos:anularContable','gastos:pagarContable','gastos:revertirPagoContable','gastos:aprobarContable','gastos:consultarContabilidad','gastos:cerrarPeriodo','gastos:reabrirPeriodo','gastos:listarCuentas'], true)) return (new ExpenseAccountingService())->handle($db, $channel, (array) ($args[0] ?? []), $actor);
         if ($channel === 'auth:login') return $this->authLogin($db, (array) ($args[0] ?? []));
         if ($channel === 'config:get') return $this->configGet($db, (string) ($args[0] ?? ''));
         if ($channel === 'config:set') return $this->configSet($db, ['clave' => $args[0] ?? '', 'valor' => $args[1] ?? '', 'categoria' => $args[2] ?? 'general']);
@@ -361,42 +362,259 @@ final class SystemRuntimeService
         return $user ? ['success' => true, 'data' => $user] : ['success' => false, 'error' => $mode === 'pin' ? 'PIN incorrecto' : 'Usuario o contrasena incorrectos'];
     }
 
+    /**
+     * Atomic POS sale.
+     *
+     * - Idempotent by operation uid (payload.operation_uid, factura.operation_uid
+     *   or factura.otro.offline_uid): a replay of an already committed sale
+     *   returns the existing factura with duplicate=true instead of failing.
+     * - IMEI/serial rows are only sold while they are DISPONIBLE; otherwise the
+     *   whole sale is rolled back ("El IMEI X ya fue vendido").
+     * - When comprobante_id is provided the NCF is assigned here, under the
+     *   write lock, from comprobantes_fiscales.secuencia_actual (prefix + 8
+     *   digits for B-series, 10 for E-series) and returned in data.ncf. A
+     *   client NCF is kept only while no other factura uses it.
+     * - BEGIN IMMEDIATE takes SQLite's write lock before any read, so two
+     *   devices can never read the same sequence value or stock state.
+     * - Realtime/webhook events are dispatched only after COMMIT.
+     */
     private function guardarVenta(PDO $db, array $project, array $payload): array
     {
         $factura = (array) ($payload['factura'] ?? []);
-        if (trim((string) ($factura['no_factura'] ?? '')) === '') throw new InvalidArgumentException('La venta no tiene numero de factura.');
-        $db->beginTransaction();
+        $noFactura = trim((string) ($factura['no_factura'] ?? ''));
+        if ($noFactura === '') throw new InvalidArgumentException('La venta no tiene numero de factura.');
+        $operationUid = $this->saleOperationUid($payload, $factura);
+        $comprobanteId = (int) ($payload['comprobante_id'] ?? 0);
+
+        // Schema changes happen before the transaction so the lock stays short.
+        $this->table($db, 'facturas');
+        if ($operationUid !== '') {
+            $this->ensureSaleOperationColumn($db);
+            $factura['operation_uid'] = $operationUid;
+        }
+
+        $events = [];
+        $inTransaction = false;
         try {
-            $exists = $db->prepare('SELECT 1 FROM facturas WHERE no_factura = ? LIMIT 1');
-            $exists->execute([$factura['no_factura']]);
-            if ($exists->fetchColumn()) throw new RuntimeException('La factura ya existe.');
-            $facturaId = $this->insertRaw($db, $project, 'facturas', $factura);
-            if (!empty($payload['cuenta_cobrar'])) $this->insertRaw($db, $project, 'cuentas_cobrar', (array) $payload['cuenta_cobrar']);
-            if (!empty($payload['comprobante_id'])) $db->prepare('UPDATE comprobantes_fiscales SET secuencia_actual=secuencia_actual+1, updated_at=? WHERE id=?')->execute([$this->now(), (int) $payload['comprobante_id']]);
-            foreach ((array) ($payload['inventario'] ?? []) as $item) {
-                $tableName = (string) ($item['tabla'] ?? '');
-                if (!in_array($tableName, ['imei', 'serial', 'accesorios'], true)) throw new InvalidArgumentException('Producto de inventario no valido.');
-                $table = Support::quoteIdentifier($tableName);
-                if ($tableName === 'accesorios') {
-                    // UPDATE directo (no updateRaw) porque la condicion cantidad>=?
-                    // evita vender mas de lo disponible en una sola sentencia
-                    // atomica; el aviso de realtime se dispara aparte, solo si de
-                    // verdad descontó algo (rowCount>0), igual que hace updateRaw.
-                    $stmt = $db->prepare("UPDATE $table SET cantidad=cantidad-?, updated_at=? WHERE id=? AND cantidad>=?");
-                    $stmt->execute([(float) ($item['cantidad'] ?? 0), $this->now(), (int) $item['id'], (float) ($item['cantidad'] ?? 0)]);
-                    if ($stmt->rowCount() > 0) $this->webhooks->dispatch('record.updated', $project, $tableName, $this->row($db, $table, (int) $item['id']));
-                } else {
-                    $this->updateRaw($db, $project, $tableName, (int) $item['id'], (array) ($item['cambios'] ?? []));
+            $db->exec('BEGIN IMMEDIATE');
+            $inTransaction = true;
+
+            if ($operationUid !== '') {
+                $existing = $this->facturaByOperation($db, $operationUid);
+                if ($existing) {
+                    $db->exec('ROLLBACK');
+                    $inTransaction = false;
+                    return $this->duplicateSaleResult($existing, $operationUid);
                 }
             }
+
+            $exists = $db->prepare('SELECT 1 FROM facturas WHERE no_factura = ? LIMIT 1');
+            $exists->execute([$noFactura]);
+            if ($exists->fetchColumn()) throw new RuntimeException("La factura $noFactura ya existe.");
+
+            if ($comprobanteId > 0) {
+                $factura['ncf'] = $this->assignSaleNcf($db, $comprobanteId, trim((string) ($factura['ncf'] ?? '')));
+            }
+
+            foreach ((array) ($payload['inventario'] ?? []) as $item) {
+                $item = (array) $item;
+                $tableName = (string) ($item['tabla'] ?? '');
+                $itemId = (int) ($item['id'] ?? 0);
+                if (!in_array($tableName, ['imei', 'serial', 'accesorios'], true) || $itemId <= 0) throw new InvalidArgumentException('Producto de inventario no valido.');
+                $table = $this->table($db, $tableName);
+                if ($tableName === 'accesorios') {
+                    // La condicion cantidad>=? evita vender mas de lo disponible en
+                    // una sola sentencia; el aviso de realtime solo se emite si de
+                    // verdad desconto algo (comportamiento previo conservado).
+                    $stmt = $db->prepare("UPDATE $table SET cantidad=cantidad-?, updated_at=? WHERE id=? AND cantidad>=?");
+                    $stmt->execute([(float) ($item['cantidad'] ?? 0), $this->now(), $itemId, (float) ($item['cantidad'] ?? 0)]);
+                    if ($stmt->rowCount() > 0) $events[] = ['record.updated', $tableName, $itemId];
+                } else {
+                    $this->sellUniqueItem($db, $tableName, $itemId, (array) ($item['cambios'] ?? []));
+                    $events[] = ['record.updated', $tableName, $itemId];
+                }
+            }
+
+            $facturaId = $this->insertRaw($db, $project, 'facturas', $factura, false);
+            $events[] = ['record.created', 'facturas', $facturaId];
+            if (!empty($payload['cuenta_cobrar'])) {
+                $cuentaId = $this->insertRaw($db, $project, 'cuentas_cobrar', (array) $payload['cuenta_cobrar'], false);
+                $events[] = ['record.created', 'cuentas_cobrar', $cuentaId];
+            }
             foreach ((array) ($payload['bancos'] ?? []) as $mov) {
+                $mov = (array) $mov;
                 if ((int) ($mov['id'] ?? 0) <= 0 || (float) ($mov['monto'] ?? 0) <= 0) continue;
                 $db->prepare('UPDATE bancos SET saldo=saldo+?, fecha_transaccion=?, updated_at=? WHERE id=?')->execute([(float) $mov['monto'], $this->now(), $this->now(), (int) $mov['id']]);
-                $this->webhooks->dispatch('record.updated', $project, 'bancos', $this->row($db, 'bancos', (int) $mov['id']));
+                $events[] = ['record.updated', 'bancos', (int) $mov['id']];
             }
-            $db->commit();
-            return ['success' => true, 'data' => ['id' => $facturaId]];
-        } catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
+
+            $uidStmt = $db->prepare('SELECT uid FROM facturas WHERE id = ? LIMIT 1');
+            $uidStmt->execute([$facturaId]);
+            $facturaUid = (string) ($uidStmt->fetchColumn() ?: '');
+
+            $db->exec('COMMIT');
+            $inTransaction = false;
+        } catch (\Throwable $e) {
+            if ($inTransaction) {
+                try { $db->exec('ROLLBACK'); } catch (\Throwable) { /* already rolled back by SQLite */ }
+            }
+            // A concurrent replay of the same operation won the race: answer
+            // with the committed factura instead of an error.
+            if ($operationUid !== '' && $e instanceof \PDOException) {
+                $existing = $this->facturaByOperation($db, $operationUid);
+                if ($existing) return $this->duplicateSaleResult($existing, $operationUid);
+            }
+            if ($e instanceof \PDOException && $this->isSqliteBusy($e)) {
+                // 423 is forwarded by ApiController and treated as "retry later" by clients.
+                throw new RuntimeException('La base de datos esta ocupada; la venta no se guardo. Intenta de nuevo.', 423, $e);
+            }
+            throw $e;
+        }
+
+        foreach ($events as [$event, $tableName, $id]) {
+            try {
+                $this->webhooks->dispatch($event, $project, $tableName, $this->row($db, Support::quoteIdentifier($tableName), (int) $id));
+            } catch (\Throwable) {
+                // The sale is committed; a failed notification must not report it as failed.
+            }
+        }
+        return ['success' => true, 'data' => [
+            'id' => $facturaId,
+            'uid' => $facturaUid,
+            'ncf' => (string) ($factura['ncf'] ?? ''),
+            'operation_uid' => $operationUid,
+            'duplicate' => false,
+        ]];
+    }
+
+    private function saleOperationUid(array $payload, array $factura): string
+    {
+        $uid = trim((string) ($payload['operation_uid'] ?? $factura['operation_uid'] ?? ''));
+        if ($uid === '') {
+            $otro = $factura['otro'] ?? null;
+            if (is_string($otro) && $otro !== '') $otro = json_decode($otro, true);
+            if (is_array($otro)) $uid = trim((string) ($otro['offline_uid'] ?? ''));
+        }
+        if ($uid === '') return '';
+        if (!preg_match('/^[A-Za-z0-9_.:-]{8,100}$/D', $uid)) throw new InvalidArgumentException('Identificador de operacion de venta no valido.');
+        return $uid;
+    }
+
+    private function ensureSaleOperationColumn(PDO $db): void
+    {
+        if (!$this->hasColumn($db, 'facturas', 'operation_uid')) {
+            // Two first sales may race to add the column; only a real absence is an error.
+            try { $db->exec('ALTER TABLE facturas ADD COLUMN operation_uid TEXT'); }
+            catch (\Throwable $e) { if (!$this->hasColumn($db, 'facturas', 'operation_uid')) throw $e; }
+        }
+        // Partial unique index: legacy rows without uid are not affected. The
+        // SELECT under BEGIN IMMEDIATE already prevents duplicates; the index
+        // is a second guard, so failing to create it is not fatal.
+        try {
+            $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_facturas_operation_uid ON facturas(operation_uid) WHERE operation_uid IS NOT NULL AND operation_uid <> ''");
+        } catch (\Throwable) {
+        }
+    }
+
+    private function facturaByOperation(PDO $db, string $operationUid): array|false
+    {
+        if (!$this->hasColumn($db, 'facturas', 'operation_uid')) return false;
+        $stmt = $db->prepare('SELECT * FROM facturas WHERE operation_uid = ? LIMIT 1');
+        $stmt->execute([$operationUid]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    private function duplicateSaleResult(array $existing, string $operationUid): array
+    {
+        return ['success' => true, 'duplicate' => true, 'data' => [
+            'id' => (int) $existing['id'],
+            'uid' => (string) ($existing['uid'] ?? ''),
+            'ncf' => (string) ($existing['ncf'] ?? ''),
+            'operation_uid' => $operationUid,
+            'duplicate' => true,
+        ]];
+    }
+
+    /** Marks an IMEI/serial row as sold only while it is still available; throws otherwise. */
+    private function sellUniqueItem(PDO $db, string $tableName, int $id, array $cambios): void
+    {
+        $table = Support::quoteIdentifier($tableName);
+        if (!$this->hasColumn($db, $tableName, 'estado')) $db->exec("ALTER TABLE $table ADD COLUMN estado TEXT DEFAULT 'DISPONIBLE'");
+        $data = $this->cleanData($db, $tableName, $cambios, false);
+        unset($data['id'], $data['uid'], $data['created_at']);
+        if (!array_key_exists('estado', $data)) $data['estado'] = 'VENDIDO';
+        if ($this->hasColumn($db, $tableName, 'updated_at')) $data['updated_at'] = $this->now();
+        $set = implode(',', array_map(fn (string $column): string => Support::quoteIdentifier($column) . '=?', array_keys($data)));
+        // Missing/empty estado counts as DISPONIBLE, same rule as src/domain/inventoryRules.ts.
+        $stmt = $db->prepare("UPDATE $table SET $set WHERE id=? AND UPPER(TRIM(COALESCE(NULLIF(TRIM(estado),''),'DISPONIBLE')))='DISPONIBLE'");
+        $stmt->execute([...array_values($data), $id]);
+        if ($stmt->rowCount() === 1) return;
+
+        $current = $db->prepare("SELECT * FROM $table WHERE id=? LIMIT 1");
+        $current->execute([$id]);
+        $row = $current->fetch(PDO::FETCH_ASSOC);
+        $label = $tableName === 'imei' ? 'IMEI' : 'serial';
+        if (!$row) throw new RuntimeException("El $label #$id no existe.");
+        $code = trim((string) ($row[$tableName] ?? $row['numero'] ?? $row['nombre'] ?? $id));
+        $estado = strtoupper(trim((string) ($row['estado'] ?? '')));
+        if ($estado === 'VENDIDO') throw new RuntimeException("El $label $code ya fue vendido.");
+        throw new RuntimeException("El $label $code no esta disponible ($estado).");
+    }
+
+    private function ncfInUse(PDO $db, string $ncf): bool
+    {
+        if ($ncf === '' || !$this->hasColumn($db, 'facturas', 'ncf')) return false;
+        $stmt = $db->prepare('SELECT 1 FROM facturas WHERE ncf = ? LIMIT 1');
+        $stmt->execute([$ncf]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * Returns the NCF for the sale and advances secuencia_actual. Must run
+     * inside the sale transaction, after BEGIN IMMEDIATE.
+     */
+    private function assignSaleNcf(PDO $db, int $comprobanteId, string $clientNcf): string
+    {
+        $stmt = $db->prepare('SELECT * FROM comprobantes_fiscales WHERE id = ? LIMIT 1');
+        $stmt->execute([$comprobanteId]);
+        $comp = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$comp) throw new RuntimeException('El comprobante fiscal seleccionado no existe.');
+        $tipo = strtoupper(trim((string) ($comp['tipo'] ?? '')));
+        if ($tipo === '' || $tipo === 'SIN') return $clientNcf;
+
+        $prefijo = trim((string) ($comp['prefijo'] ?? ''));
+        if ($prefijo === '') $prefijo = $tipo;
+        $digits = str_starts_with($tipo, 'E') ? 10 : 8;
+        $seq = max(1, (int) ($comp['secuencia_actual'] ?? 1));
+        $hasta = (int) ($comp['secuencia_hasta'] ?? 0);
+
+        $ncf = '';
+        if ($clientNcf !== '' && !$this->ncfInUse($db, $clientNcf)) {
+            // Backward compatibility: keep a unique client NCF and never leave
+            // the sequence behind a number the client already used.
+            $ncf = $clientNcf;
+            $next = $seq + 1;
+            $suffix = str_starts_with($clientNcf, $prefijo) ? substr($clientNcf, strlen($prefijo)) : '';
+            if ($suffix !== '' && ctype_digit($suffix)) $next = max($next, (int) $suffix + 1);
+        } else {
+            for ($guard = 0; $guard < 10000; $guard++, $seq++) {
+                if ($hasta > 0 && $seq > $hasta) throw new RuntimeException("La secuencia fiscal $prefijo esta agotada.");
+                $candidate = $prefijo . str_pad((string) $seq, $digits, '0', STR_PAD_LEFT);
+                if (!$this->ncfInUse($db, $candidate)) { $ncf = $candidate; break; }
+            }
+            if ($ncf === '') throw new RuntimeException("No se encontro un NCF libre para $prefijo.");
+            $next = $seq + 1;
+        }
+        $update = $db->prepare('UPDATE comprobantes_fiscales SET secuencia_actual=?, updated_at=? WHERE id=?');
+        $update->execute([$next, $this->now(), $comprobanteId]);
+        if ($update->rowCount() !== 1) throw new RuntimeException('No se pudo consumir la secuencia fiscal.');
+        return $ncf;
+    }
+
+    private function isSqliteBusy(\PDOException $e): bool
+    {
+        $driverCode = (int) ($e->errorInfo[1] ?? 0);
+        return in_array($driverCode, [5, 6], true) || stripos($e->getMessage(), 'database is locked') !== false;
     }
 
     private function cobrarPendiente(PDO $db, array $project, array $p): array
@@ -461,7 +679,7 @@ final class SystemRuntimeService
     private function gastosTurno(PDO $db, string $warehouse): array
     {
         $turno=$this->turnoActivo($db,$warehouse)['data'];if(!$turno)return['success'=>true,'data'=>['total'=>0,'cantidad'=>0]];
-        $where='created_at>=?';$params=[$turno['created_at']];if($warehouse!==''){$where.=" AND (almacen_uid=? OR COALESCE(almacen_uid,'')='')";$params[]=$warehouse;}$stmt=$db->prepare("SELECT COALESCE(SUM(cantidad),0) total,COUNT(*) cantidad FROM gastos WHERE $where");$stmt->execute($params);return['success'=>true,'data'=>$stmt->fetch()];
+        $where='created_at>=?';$params=[$turno['created_at']];if($warehouse!==''){$where.=" AND (almacen_uid=? OR COALESCE(almacen_uid,'')='')";$params[]=$warehouse;}$stmt=$db->prepare("SELECT * FROM gastos WHERE $where");$stmt->execute($params);$total=0;$count=0;foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $g){if(!empty($g['contabilidad_json'])||in_array($g['estado_contable']??'',['ANULADO','PENDIENTE_APROBACION'],true))continue;$total+=(float)($g['cantidad']??0);$count++;}return['success'=>true,'data'=>['total'=>$total,'cantidad'=>$count]];
     }
 
     private function realizarCuadre(PDO $db, array $project, array $data): array
@@ -687,7 +905,7 @@ final class SystemRuntimeService
     private function bitacora(PDO $db,int $limit):array { if(!$this->exists($db,'bitacora'))return['success'=>true,'data'=>[]];$limit=max(1,min(5000,$limit));return['success'=>true,'data'=>$db->query("SELECT * FROM bitacora ORDER BY id DESC LIMIT $limit")->fetchAll()]; }
     private function clearBitacora(PDO $db):array { if($this->exists($db,'bitacora'))$db->exec('DELETE FROM bitacora');return['success'=>true]; }
     private function audit(PDO $db,string $table,int $id,string $action,array $actor,mixed $new,mixed $old):void { if(!$this->exists($db,'bitacora'))return;try{$stmt=$db->prepare('INSERT INTO bitacora(tabla,registro_id,accion,usuario,datos_nuevos,datos_anteriores,uid,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)');$now=$this->now();$stmt->execute([$table,$id,$action,(string)($actor['email']??''),json_encode($new,JSON_UNESCAPED_UNICODE),json_encode($old,JSON_UNESCAPED_UNICODE),Support::uid('rec_'),$now,$now]);}catch(\Throwable){} }
-    private function insertRaw(PDO $db,array $project,string $tableName,array $data):int { $this->table($db,$tableName);$data=$this->cleanData($db,$tableName,$data,true);$now=$this->now();if($this->hasColumn($db,$tableName,'uid')&&empty($data['uid']))$data['uid']=Support::uid('rec_');if($this->hasColumn($db,$tableName,'created_at')&&empty($data['created_at']))$data['created_at']=$now;if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=$now;$cols=array_keys($data);$db->prepare('INSERT INTO '.Support::quoteIdentifier($tableName).' ('.implode(',',array_map([Support::class,'quoteIdentifier'],$cols)).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).')')->execute(array_values($data));$id=(int)$db->lastInsertId();$this->webhooks->dispatch('record.created',$project,$tableName,$this->row($db,$this->table($db,$tableName),$id));return$id; }
+    private function insertRaw(PDO $db,array $project,string $tableName,array $data,bool $dispatch=true):int { $this->table($db,$tableName);$data=$this->cleanData($db,$tableName,$data,true);$now=$this->now();if($this->hasColumn($db,$tableName,'uid')&&empty($data['uid']))$data['uid']=Support::uid('rec_');if($this->hasColumn($db,$tableName,'created_at')&&empty($data['created_at']))$data['created_at']=$now;if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=$now;$cols=array_keys($data);$db->prepare('INSERT INTO '.Support::quoteIdentifier($tableName).' ('.implode(',',array_map([Support::class,'quoteIdentifier'],$cols)).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).')')->execute(array_values($data));$id=(int)$db->lastInsertId();if($dispatch)$this->webhooks->dispatch('record.created',$project,$tableName,$this->row($db,$this->table($db,$tableName),$id));return$id; }
     private function updateRaw(PDO $db,array $project,string $tableName,int $id,array $data):void { $data=$this->cleanData($db,$tableName,$data,false);if($this->hasColumn($db,$tableName,'updated_at'))$data['updated_at']=$this->now();unset($data['id']);if(!$data)return;$set=implode(',',array_map(fn($c)=>Support::quoteIdentifier($c).'=?',array_keys($data)));$db->prepare('UPDATE '.Support::quoteIdentifier($tableName)." SET $set WHERE id=?")->execute([...array_values($data),$id]);$this->webhooks->dispatch('record.updated',$project,$tableName,$this->row($db,$this->table($db,$tableName),$id)); }
     private function ensureAccessoryCommissionColumns(PDO $db, string $table): void
     {

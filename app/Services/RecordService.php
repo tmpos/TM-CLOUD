@@ -231,8 +231,10 @@ final class RecordService
         $inserted = 0;
         $updated = 0;
         $errors = [];
+        $replica = in_array($table, ['gastos','cuentas_pagar','gasto_pagos','gasto_asientos','gasto_historial','contabilidad_periodos'], true) && $db->query("SELECT name FROM sqlite_master WHERE name='_expense_guard'")->fetchColumn();
         $db->beginTransaction();
         try {
+            if ($replica) $db->exec('UPDATE _expense_guard SET active=2 WHERE id=1');
             foreach ($rows as $index => $row) {
                 try {
                     if (!is_array($row) || empty($row['uid'])) {
@@ -258,6 +260,7 @@ final class RecordService
                 $db->rollBack();
                 throw new \InvalidArgumentException('Atomic upsert request rolled back at row ' . $errors[0]['row'] . ': ' . $errors[0]['error']);
             }
+            if ($replica) $db->exec('UPDATE _expense_guard SET active=0 WHERE id=1');
             $db->commit();
         } catch (\Throwable $e) {
             if ($db->inTransaction()) {

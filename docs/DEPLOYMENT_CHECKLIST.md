@@ -11,6 +11,7 @@ Este procedimiento evita publicar cambios de API, correo, portal o PDF sin valid
 - [ ] Confirmar que PHP tiene habilitadas `pdo_sqlite`, `fileinfo`, `mbstring` y `gd`; verificar que `Mpdf\\Mpdf` carga desde `vendor/autoload.php`.
 - [ ] Ejecutar `php tests/mpdf-smoke.php` y confirmar `PDF_SMOKE=OK` y `PHPMAILER=OK` antes de publicar.
 - [ ] Ejecutar `php tests/invoice-pdf-smoke.php` y confirmar que la factura profesional con logo y QR DGII se genera correctamente.
+- [ ] Confirmar `node -v` en el servidor (o `NODE_BINARY`) y ejecutar `php tests/expense-accounting.php`; debe imprimir `PASS`. Sin Node, los canales `gastos:*` responden con error y Gastos no contabiliza.
 - [ ] Mantener `APP_DEBUG=false`, `SESSION_SECURE=true` y una URL HTTPS sin barra final.
 - [ ] Configurar `CORS_ALLOWED_ORIGINS` con orígenes concretos, nunca `*` en producción.
 - [ ] Configurar `TRUSTED_PROXIES` solo si existe un proxy inverso conocido; no confiar globalmente en `X-Forwarded-For`.
