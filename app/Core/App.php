@@ -72,7 +72,7 @@ final class App
         $keys = new ApiKeyService($db, $schema, $config['rate_limit']);
         $auth = new Auth($db);
         $installer = new InstallerService($config, $auth);
-        $licenses = new LicenseService($db, $logs);
+        $licenses = new LicenseService($db, $logs, $realtime);
         $databaseBridge = new DatabaseBridgeService($db, $schema, $logs, $config);
         $signatures = new InvoiceSignatureService($db, $config, $logs, $schema, $realtime);
         $pdf = new PdfService($schema, $licenses, $signatures);

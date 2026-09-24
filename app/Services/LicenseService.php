@@ -17,7 +17,7 @@ final class LicenseService
         'equipos_no_autorizados',
     ];
 
-    public function __construct(private PDO $db, private LogService $logs)
+    public function __construct(private PDO $db, private LogService $logs, private ?RealtimeService $realtime = null)
     {
     }
 
@@ -342,6 +342,7 @@ final class LicenseService
             throw $e;
         }
         $this->logs->write('license.device_authorized', $license['project_uid'], null, $uid, null, ['device_id' => $deviceId]);
+        $this->notifyDeviceStatus($license, $deviceId, 'authorized');
         return $this->find($uid);
     }
 
@@ -350,6 +351,7 @@ final class LicenseService
         $license = $this->find($uid);
         $this->setDeviceStatus($uid, $deviceId, 'blocked');
         $this->logs->write('license.device_blocked', $license['project_uid'], null, $uid, null, ['device_id' => $deviceId]);
+        $this->notifyDeviceStatus($license, $deviceId, 'blocked');
         return $this->find($uid);
     }
 
@@ -358,7 +360,26 @@ final class LicenseService
         $license = $this->find($uid);
         $this->setDeviceStatus($uid, $deviceId, 'revoked');
         $this->logs->write('license.device_revoked', $license['project_uid'], null, $uid, null, ['device_id' => $deviceId]);
+        $this->notifyDeviceStatus($license, $deviceId, 'revoked');
         return $this->find($uid);
+    }
+
+    /**
+     * Tells the project's realtime subscribers that a device changed status, so
+     * a device waiting on the license screen continues as soon as it is
+     * authorized. The client re-checks with the API; this is only the signal.
+     */
+    private function notifyDeviceStatus(array $license, string $deviceId, string $status): void
+    {
+        try {
+            $this->realtime?->broadcast('license.device_status', ['uid' => (string) $license['project_uid']], 'license_devices', [
+                'license_uid' => (string) $license['uid'],
+                'device_id' => strtoupper(trim($deviceId)),
+                'status' => $status,
+            ]);
+        } catch (\Throwable) {
+            // The status change is committed; a missed notification is covered by the client's polling.
+        }
     }
 
     public function resetUses(string $uid): array
