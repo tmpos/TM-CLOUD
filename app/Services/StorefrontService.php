@@ -83,6 +83,7 @@ final class StorefrontService
         }
         $catalogSettings = $this->validateCatalogSettings($projectUid, $input, $store);
         $fields = [
+            'page_content' => StorefrontPagesService::encode($input, $store),
             'slug' => $slug,
             'enabled' => isset($input['enabled']) ? 1 : 0,
             'store_name' => $storeName,
@@ -172,6 +173,20 @@ final class StorefrontService
     public function warehouseForStore(array $store): ?array
     {
         return self::selectedWarehouse($this->schema->connection($this->projects->findActive((string) $store['project_uid'])), $store);
+    }
+
+    public function isSpa(array $store): bool
+    {
+        $project = $this->projects->findActive((string) $store['project_uid']);
+        $warehouse = $this->warehouseForStore($store);
+        if (!$warehouse || !empty($warehouse['missing'])) return false;
+        $db = $this->schema->connection($project);
+        $columns = array_column($db->query('PRAGMA table_info("apariencia_almacen")')->fetchAll(), 'name');
+        if (!in_array('modo_tienda', $columns, true)) return false;
+        [$where, $params] = self::warehouseCondition($columns, $warehouse);
+        $stmt = $db->prepare('SELECT modo_tienda FROM apariencia_almacen WHERE ' . $where . ' ORDER BY id DESC LIMIT 1');
+        $stmt->execute($params);
+        return $stmt->fetchColumn() === 'spa';
     }
 
     public static function warehouseOptions(PDO $db): array
@@ -1365,6 +1380,7 @@ final class StorefrontService
 
     private function withCompanyIdentity(array $store): array
     {
+        $store['is_spa'] = $this->isSpa($store);
         try {
             $project = $this->projects->findActive((string) $store['project_uid']);
             $db = $this->schema->connection($project);
@@ -1569,6 +1585,7 @@ final class StorefrontService
 
     private function withPresentation(array $store): array
     {
+        $store = StorefrontPagesService::decode($store);
         $raw = $store['hero_images'] ?? [];
         if (is_string($raw)) {
             $raw = json_decode($raw, true) ?: [];

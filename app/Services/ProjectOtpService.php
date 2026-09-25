@@ -92,6 +92,15 @@ final class ProjectOtpService
             ->execute([$mode, $fixedCode, $intervalSeconds, $sendEmail, $secret, $now, self::CONFIG_UID]);
     }
 
+    public function validateSupportLogin(PDO $db, string $code, string $now): bool
+    {
+        $code = trim($code);
+        if (preg_match('/^\d{4}$/D', $code) !== 1) return false;
+        $row = $this->row($db, $now);
+        if ($row['mode'] === 'fixed') return hash_equals(str_replace(':', '', substr($now, 11, 5)), $code);
+        return $this->validate($db, $code, $now);
+    }
+
     /** Accepts the current and the previous window (clock drift); fixed mode compares the fixed code. */
     public function validate(PDO $db, string $code, string $now): bool
     {

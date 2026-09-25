@@ -5,7 +5,7 @@ $primario = preg_match('/^#[0-9a-fA-F]{3,8}$/', (string) ($settings['color_prima
 $whatsappDigits = preg_replace('/\D+/', '', (string) ($settings['whatsapp'] ?? $settings['telefono'] ?? ''));
 $moneyFmt = static fn (float $value): string => number_format($value, 2);
 $value = static fn (string $key, string $fallback = ''): string => $escape($_POST[$key] ?? $fallback);
-$hoy = gmdate('Y-m-d');
+$hoy = (new DateTimeImmutable('now', new DateTimeZone($scheduleSettings['timezone'] ?? 'America/Santo_Domingo')))->format('Y-m-d');
 ?>
 <!doctype html>
 <html lang="es">
@@ -156,7 +156,11 @@ footer{padding:30px 20px;text-align:center;color:#8a8095;font-size:13px}
         </select>
         <div class="grid2">
           <div><label>Fecha</label><input name="fecha" type="date" min="<?= $escape($hoy) ?>" required value="<?= $value('fecha') ?>"></div>
+          <?php if ($scheduleSettings['enabled'] ?? false): ?>
+          <?php require __DIR__ . '/spa-shift-picker.php'; ?>
+          <?php else: ?>
           <div><label>Hora</label><input name="hora" type="time" required value="<?= $value('hora') ?>"></div>
+          <?php endif; ?>
         </div>
         <label>Nota (opcional)</label>
         <textarea name="nota" maxlength="500"><?= $value('nota') ?></textarea>

@@ -62,6 +62,21 @@ final class SpaAppointmentService
         return $request;
     }
 
+    public function publicServices(array $request, array $project): array
+    {
+        $rows = $this->records->all($project, 'servicios');
+        $services = [];
+        foreach ($rows as $row) {
+            if (strtoupper((string) ($row['estado'] ?? 'ACTIVO')) !== 'ACTIVO') continue;
+            if (!empty($request['almacen_uid']) && !empty($row['almacen_uid']) && $request['almacen_uid'] !== $row['almacen_uid']) continue;
+            if ((empty($request['almacen_uid']) || empty($row['almacen_uid'])) && !empty($request['almacen_id']) && !empty($row['almacen_id']) && (int) $request['almacen_id'] !== (int) $row['almacen_id']) continue;
+            if (trim((string) ($row['nombre'] ?? '')) === '') continue;
+            $services[] = ['uid' => (string) $row['uid'], 'nombre' => (string) $row['nombre']];
+        }
+        usort($services, static fn ($a, $b) => strcasecmp($a['nombre'], $b['nombre']));
+        return $services;
+    }
+
     public function complete(array $request, array $project, array $input): array
     {
         if (($request['status'] ?? '') === 'used' && empty($request['reusable'])) throw new RuntimeException('Este enlace ya fue utilizado.', 409);
@@ -71,12 +86,11 @@ final class SpaAppointmentService
         if ($phone === '') throw new InvalidArgumentException('Indique un telefono valido.');
         $fecha = trim((string) ($input['fecha'] ?? ''));
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha)) throw new InvalidArgumentException('Indique una fecha valida.');
-        $hoy = gmdate('Y-m-d');
-        if ($fecha < $hoy) throw new InvalidArgumentException('La fecha debe ser hoy o una fecha futura.');
-        $hora = trim((string) ($input['hora'] ?? ''));
-        if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $hora)) throw new InvalidArgumentException('Indique una hora valida.');
-        $servicio = mb_strtoupper(trim((string) ($input['servicio'] ?? '')), 'UTF-8');
-        if (mb_strlen($servicio) > 160) throw new InvalidArgumentException('El servicio solicitado es demasiado largo.');
+        $hora = (new SpaScheduleService())->bookingTime($project, $input);
+        $services = $this->publicServices($request, $project);
+        $selected = array_values(array_filter($services, static fn ($service) => $service['uid'] === (string) ($input['servicio_uid'] ?? '')));
+        if (count($selected) !== 1) throw new InvalidArgumentException('Seleccione un servicio disponible del listado.');
+        $servicio = mb_strtoupper(trim($selected[0]['nombre']), 'UTF-8');
         $nota = trim((string) ($input['nota'] ?? ''));
         if (mb_strlen($nota) > 500) throw new InvalidArgumentException('La nota es demasiado larga.');
 

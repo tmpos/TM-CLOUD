@@ -22,6 +22,7 @@ final class CustomerRegistrationService
 
     public function create(array $project, array $input, string $createdBy = '', bool $allowEmptyPhone = false): array
     {
+        $crm = !empty($input['crm']) ? (new CrmRegistrationService($this->schema, $this->records, $this->logs, $this->webhooks))->prepare($project, (array) $input['crm']) : null;
         $reusable = ($input['reusable'] ?? false) === true;
         $phone = self::phone((string) ($input['phone'] ?? $input['telefono'] ?? ''));
         if ($phone === '' && !$reusable && !$allowEmptyPhone) throw new InvalidArgumentException('Indique el numero de WhatsApp del cliente.');
@@ -36,8 +37,8 @@ final class CustomerRegistrationService
         $expiresAt = $reusable ? '9999-12-31 23:59:59' : gmdate('Y-m-d H:i:s', time() + 7 * 86400);
         $almacenId = max(0, (int) ($input['almacen_id'] ?? 0));
         $almacenUid = substr(trim((string) ($input['almacen_uid'] ?? '')), 0, 120);
-        $this->db->prepare('INSERT INTO customer_registration_requests (uid,token_hash,project_uid,status,phone,almacen_id,almacen_uid,expires_at,created_by,created_at,reusable) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-            ->execute([$uid, hash('sha256', $token), $project['uid'], 'pending', $phone, $almacenId ?: null, $almacenUid ?: null, $expiresAt, substr(trim($createdBy), 0, 160), $now, (int) $reusable]);
+        $this->db->prepare('INSERT INTO customer_registration_requests (uid,token_hash,project_uid,status,phone,almacen_id,almacen_uid,expires_at,created_by,created_at,reusable,crm_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+            ->execute([$uid, hash('sha256', $token), $project['uid'], 'pending', $phone, $almacenId ?: null, $almacenUid ?: null, $expiresAt, substr(trim($createdBy), 0, 160), $now, (int) $reusable, $crm ? json_encode($crm, JSON_THROW_ON_ERROR) : null]);
         $this->logs->write('customer.registration_requested', (string) $project['uid'], 'clientes', $uid, null, ['phone' => $phone, 'almacen_id' => $almacenId, 'almacen_uid' => $almacenUid]);
 
         return [
@@ -46,6 +47,7 @@ final class CustomerRegistrationService
             'phone' => $phone,
             'expires_at' => $reusable ? null : $expiresAt,
             'reusable' => $reusable,
+            'crm' => $crm !== null,
             'status' => 'pending',
         ];
     }
@@ -80,6 +82,7 @@ final class CustomerRegistrationService
         $allowedTypes = ['NORMAL', 'CONSUMO', 'FISCAL', 'GUBERNAMENTAL', 'REGIMEN_ESPECIAL', 'EXPORTACION'];
         if (!in_array($type, $allowedTypes, true)) $type = 'NORMAL';
 
+        if (!empty($request['crm_json'])) (new CrmRegistrationService($this->schema, $this->records, $this->logs, $this->webhooks))->validate($input);
         $claim = $this->db->prepare("UPDATE customer_registration_requests SET status='processing' WHERE uid=? AND status='pending' AND expires_at>?");
         $claim->execute([$request['uid'], gmdate('Y-m-d H:i:s')]);
         if ($claim->rowCount() !== 1) throw new RuntimeException('El enlace ya fue utilizado o expiro.', 409);
@@ -104,7 +107,9 @@ final class CustomerRegistrationService
             foreach ($data as $key => $value) {
                 if ($value === '' && !in_array($key, ['email', 'direccion', 'rnc', 'cedula'], true)) unset($data[$key]);
             }
-            $customer = $this->records->create($project, 'clientes', $data);
+            $customer = !empty($request['crm_json'])
+                ? (new CrmRegistrationService($this->schema, $this->records, $this->logs, $this->webhooks))->complete($project, $request, $data, $input)
+                : $this->records->create($project, 'clientes', $data);
             $now = Support::now();
             $this->db->prepare("UPDATE customer_registration_requests SET status='used',customer_uid=?,used_at=? WHERE uid=? AND status='processing'")
                 ->execute([(string) ($customer['uid'] ?? ''), $now, $request['uid']]);

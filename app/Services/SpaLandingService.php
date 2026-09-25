@@ -143,9 +143,7 @@ final class SpaLandingService
         if ($phone === '') throw new InvalidArgumentException('Indique un telefono valido.');
         $fecha = trim((string) ($input['fecha'] ?? ''));
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha)) throw new InvalidArgumentException('Indique una fecha valida.');
-        if ($fecha < gmdate('Y-m-d')) throw new InvalidArgumentException('La fecha debe ser hoy o una fecha futura.');
-        $hora = trim((string) ($input['hora'] ?? ''));
-        if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $hora)) throw new InvalidArgumentException('Indique una hora valida.');
+        $hora = (new SpaScheduleService())->bookingTime($project, $input);
         $servicio = mb_strtoupper(trim((string) ($input['servicio'] ?? '')), 'UTF-8');
         if (mb_strlen($servicio) > 160) throw new InvalidArgumentException('El servicio solicitado es demasiado largo.');
         $nota = trim((string) ($input['nota'] ?? ''));

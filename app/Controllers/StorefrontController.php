@@ -28,12 +28,15 @@ final class StorefrontController
         private ApiKeyService $keys,
         private StorefrontCommerceService $commerce,
         private MailService $mail,
+        private \App\Services\SpaAppointmentService $spaAppointments,
     ) {
     }
 
     public function register(): void
     {
         Flight::route('GET /store/@slug', fn ($slug) => $this->home((string) $slug));
+        Flight::route('GET /store/@slug/pages/@page', fn ($slug, $page) => $this->informationPage((string) $slug, (string) $page));
+        Flight::route('POST /store/@slug/pages/contacto', fn ($slug) => $this->contactSubmit((string) $slug));
         Flight::route('GET /store/@slug/products/@uid', fn ($slug, $uid) => $this->productPage((string) $slug, (string) $uid));
         Flight::route('GET /store/@slug/categories', fn ($slug) => $this->categoriesPage((string) $slug));
         Flight::route('GET /store/@slug/cart', fn ($slug) => $this->cartPage((string) $slug));
@@ -78,6 +81,77 @@ final class StorefrontController
             $this->renderPublic('storefront', compact('store', 'catalog', 'allCatalog', 'search', 'category'));
         } catch (\Throwable $e) {
             $this->notFound($e->getMessage());
+        }
+    }
+
+    private function informationPage(string $slug, string $page, ?string $error = null, array $old = []): void
+    {
+        try {
+            $store = $this->storefronts->findBySlug($slug);
+            $definition = \App\Services\StorefrontPagesService::PAGES[$page] ?? null;
+            if (!$definition) throw new \RuntimeException('Página no disponible.', 404);
+            if ($page === 'contacto') {
+                header('Cache-Control: private, no-store');
+                $services = []; $schedule = null;
+                if ($store['is_spa']) {
+                    $project = $this->projects->findActive($store['project_uid']);
+                    $scheduler = new \App\Services\SpaScheduleService();
+                    if (isset($_GET['availability'])) {
+                        try {
+                            $this->keys->rateLimitPublic('store-spa-availability:' . $store['uid'], 120);
+                            Flight::json(['data' => $scheduler->availability($project, (string) $_GET['availability'])]);
+                        } catch (\Throwable) { Flight::json(['error' => 'No se pudo consultar la disponibilidad.'], 422); }
+                        return;
+                    }
+                    $schedule = $scheduler->get($project);
+                    $services = $this->spaAppointments->publicServices($this->spaRequest($store), $project);
+                }
+                $booked = !empty($_SESSION['store_booking_success'][$store['uid']]);
+                unset($_SESSION['store_booking_success'][$store['uid']]);
+                $bookingToken = $_SESSION['store_booking_token'][$store['uid']] ??= bin2hex(random_bytes(24));
+                $this->renderPublic('storefront-information', compact('store', 'page', 'definition', 'services', 'schedule', 'booked', 'bookingToken', 'error', 'old'));
+                return;
+            }
+            header('Cache-Control: public, max-age=60');
+            $this->renderPublic('storefront-information', compact('store', 'page', 'definition'));
+        } catch (\Throwable $error) {
+            Flight::response()->status(404);
+            header('Cache-Control: no-store');
+            $this->notFound('Página no disponible.');
+        }
+    }
+
+    private function spaRequest(array $store): array
+    {
+        $warehouse = $this->storefronts->warehouseForStore($store);
+        if (!$warehouse || !empty($warehouse['missing'])) throw new \RuntimeException('Sucursal no disponible.');
+        return ['uid' => 'store:' . $store['uid'], 'reusable' => true, 'status' => 'pending',
+            'almacen_uid' => $warehouse['uid'], 'almacen_id' => $warehouse['id']];
+    }
+
+    private function contactSubmit(string $slug): void
+    {
+        $input = Http::input();
+        try {
+            $store = $this->storefronts->findBySlug($slug);
+            if (!$store['is_spa']) { $this->registerCustomer($slug, true); return; }
+            Csrf::verify($input['_csrf'] ?? null);
+            $this->keys->rateLimitPublic('store-spa-book:' . $store['uid'], 12, 900);
+            $token = $_SESSION['store_booking_token'][$store['uid']] ?? '';
+            if ($token === '' || !hash_equals($token, (string) ($input['booking_token'] ?? ''))) {
+                throw new \RuntimeException('Este formulario ya fue enviado o expiró. Recarga la página para reservar.');
+            }
+            $project = $this->projects->findActive($store['project_uid']);
+            if (!(new \App\Services\SpaScheduleService())->get($project)['enabled']) {
+                throw new \RuntimeException('Las reservas no están disponibles por ahora. Contacta al spa.');
+            }
+            $this->spaAppointments->complete($this->spaRequest($store), $project, $input);
+            unset($_SESSION['store_booking_token'][$store['uid']]);
+            $_SESSION['store_booking_success'][$store['uid']] = true;
+            Flight::redirect('/store/' . rawurlencode($store['slug']) . '/pages/contacto#registro');
+        } catch (\Throwable $error) {
+            Flight::response()->status(422);
+            $this->informationPage($slug, 'contacto', $error->getMessage(), $input);
         }
     }
 
@@ -289,7 +363,7 @@ final class StorefrontController
         }
     }
 
-    private function registerCustomer(string $slug): void
+    private function registerCustomer(string $slug, bool $fromContact = false): void
     {
         $input = Http::input();
         try {
@@ -310,13 +384,17 @@ final class StorefrontController
                 $this->customerVerification($slug, $mailError->getMessage());
             }
         } catch (\Throwable $e) {
-            $this->customerRegistration($slug, $e->getMessage(), [
+            $old = [
                 'nombre' => trim((string) ($input['nombre'] ?? '')),
                 'telefono' => trim((string) ($input['telefono'] ?? '')),
                 'email' => trim((string) ($input['email'] ?? '')),
                 'direccion' => trim((string) ($input['direccion'] ?? '')),
                 'cedula' => trim((string) ($input['cedula'] ?? '')),
-            ]);
+            ];
+            if ($fromContact) {
+                Flight::response()->status(422);
+                $this->informationPage($slug, 'contacto', $e->getMessage(), $old);
+            } else $this->customerRegistration($slug, $e->getMessage(), $old);
         }
     }
 

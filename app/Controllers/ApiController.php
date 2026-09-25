@@ -16,6 +16,7 @@ use App\Services\InvoiceSignatureService;
 use App\Services\CustomerRegistrationService;
 use App\Services\SpaAppointmentService;
 use App\Services\SpaLandingService;
+use App\Services\SpaScheduleService;
 use App\Services\PdfService;
 use App\Core\PortalAuth;
 use App\Services\LogService;
@@ -308,6 +309,48 @@ final class ApiController
                 Http::error($e, $status);
             }
         });
+        foreach (['get', 'save', 'availability', 'appointments', 'appointment-save', 'appointment-delete'] as $operation) {
+            Flight::route('POST /api/license/spa-schedule/' . $operation, function () use ($operation): void {
+                try {
+                    $input = Http::input();
+                    $project = $this->licensedProject($input, 'license-spa-schedule-' . $operation);
+                    $schedule = new SpaScheduleService();
+                    Flight::json(['data' => $schedule->handle($project, $operation, $input, $this->records, $this->webhooks)]);
+                } catch (\Throwable $e) {
+                    $status = in_array($e->getCode(), [401, 403, 404, 409, 423, 429], true) ? $e->getCode() : 422;
+                    Flight::json(['error' => $e->getMessage()], $status);
+                }
+            });
+        }
+
+        foreach (['list' => 'web:listarPedidos', 'detail' => 'web:detallePedido'] as $operation => $channel) {
+            Flight::route('POST /api/license/website-orders/' . $operation, function () use ($operation, $channel): void {
+                try {
+                    $input = Http::input();
+                    $project = $this->licensedProject($input, 'license-website-orders-' . $operation);
+                    $result = $this->runtime->handle($project, 'invoke', ['channel' => $channel, 'args' => [$input]], []);
+                    Flight::json(['data' => $result['data']]);
+                } catch (\Throwable $e) {
+                    $status = in_array($e->getCode(), [401, 403, 404, 409, 423, 429], true) ? $e->getCode() : 422;
+                    Flight::json(['error' => $e->getMessage()], $status);
+                }
+            });
+        }
+
+        foreach (['get', 'save'] as $operation) {
+            Flight::route('POST /api/license/website-settings/' . $operation, function () use ($operation): void {
+                try {
+                    $input = Http::input();
+                    $project = $this->licensedProject($input, 'license-website-' . $operation);
+                    $result = $this->runtime->handle($project, 'invoke', ['channel' => $operation === 'save' ? 'web:guardarConfiguracion' : 'web:obtenerConfiguracion', 'args' => [$input]], []);
+                    Flight::json(['data' => $result['data']]);
+                } catch (\Throwable $e) {
+                    $status = in_array($e->getCode(), [401, 403, 404, 409, 423, 429], true) ? $e->getCode() : 422;
+                    Flight::json(['error' => $e->getMessage()], $status);
+                }
+            });
+        }
+
         Flight::route('POST /api/license/spa-landing-settings/get', function (): void {
             try {
                 $input = Http::input();
@@ -835,6 +878,7 @@ final class ApiController
                 $individual = $this->customerRegistrations->create($project, [
                     'almacen_id' => $request['almacen_id'],
                     'almacen_uid' => $request['almacen_uid'],
+                    'crm' => !empty($request['crm_json']) ? json_decode($request['crm_json'], true) : null,
                 ], 'printed-qr', true);
                 Flight::redirect($individual['url'], 303);
                 return;
@@ -863,16 +907,28 @@ final class ApiController
         $request = null;
         $project = null;
         $appointment = null;
+        $services = [];
         $error = '';
+        $scheduleSettings = null;
+        $availabilityRequest = !$submit && isset($_GET['availability']);
         try {
             $this->keys->rateLimitPublic('register-spa:' . hash('sha256', $token), 30);
             $request = $this->spaAppointments->resolve($token);
             $project = $this->projects->findActive((string) $request['project_uid']);
+            $services = $this->spaAppointments->publicServices($request, $project);
+            $schedule = new SpaScheduleService();
+            $scheduleSettings = $schedule->get($project);
+            if ($availabilityRequest) {
+                if ($request['status'] !== 'pending' && empty($request['reusable'])) throw new \RuntimeException('Este enlace ya fue utilizado.', 409);
+                Flight::json(['data' => $schedule->availability($project, (string) $_GET['availability'])]);
+                return;
+            }
             if ($submit) {
                 $appointment = $this->spaAppointments->complete($request, $project, Http::input());
                 $request = $this->spaAppointments->resolve($token);
             }
         } catch (\Throwable $e) {
+            if ($availabilityRequest) { Flight::json(['error' => 'No se pudo consultar la disponibilidad.'], 422); return; }
             Flight::response()->status(in_array($e->getCode(), [409, 429], true) ? $e->getCode() : ($submit && $request && $project ? 422 : 404));
             if (!$request || !$project) {
                 echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Enlace no disponible</title><body><main style="max-width:600px;margin:50px auto;font:18px system-ui"><h1>Enlace de cita no disponible</h1><p>Solicite un enlace nuevo a la empresa.</p></main></body></html>';
@@ -885,6 +941,7 @@ final class ApiController
 
     private function serveSpaLandingPage(string $slug, bool $submit): void
     {
+        header('Cache-Control: no-store');
         header('Referrer-Policy: no-referrer');
         header('Content-Type: text/html; charset=UTF-8');
         $project = null;
@@ -892,17 +949,26 @@ final class ApiController
         $services = [];
         $booked = false;
         $error = '';
+        $scheduleSettings = null;
+        $availabilityRequest = !$submit && isset($_GET['availability']);
         try {
             $this->keys->rateLimitPublic('spa-landing:' . hash('sha256', $slug), 60);
             $project = $this->projects->findActiveBySlug($slug);
             $settings = $this->spaLanding->get($project);
             if (!$settings['enabled']) throw new \RuntimeException('Esta pagina no esta disponible.', 404);
+            $schedule = new SpaScheduleService();
+            $scheduleSettings = $schedule->get($project);
+            if ($availabilityRequest) {
+                Flight::json(['data' => $schedule->availability($project, (string) $_GET['availability'])]);
+                return;
+            }
             $services = $this->spaLanding->publicServices($project);
             if ($submit) {
                 $this->spaLanding->book($project, Http::input());
                 $booked = true;
             }
         } catch (\Throwable $e) {
+            if ($availabilityRequest) { Flight::json(['error' => 'No se pudo consultar la disponibilidad.'], 422); return; }
             if (!$project || !$settings || !$settings['enabled']) {
                 Flight::response()->status(404);
                 echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pagina no disponible</title><body><main style="max-width:600px;margin:50px auto;font:18px system-ui"><h1>Esta pagina no esta disponible</h1></main></body></html>';

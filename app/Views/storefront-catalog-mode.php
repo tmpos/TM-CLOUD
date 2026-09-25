@@ -1,3 +1,11 @@
+<script>
+// Storage can be disabled by the browser; the catalog must remain usable.
+window.storefrontStorage = {
+    getItem(key) { try { return localStorage.getItem(key); } catch (error) { return null; } },
+    setItem(key, value) { try { localStorage.setItem(key, value); } catch (error) {} },
+    removeItem(key) { try { localStorage.removeItem(key); } catch (error) {} }
+};
+</script>
 <?php if (!(int) ($store['show_prices'] ?? 1)): ?>
 <style>
 [data-add-uid],[data-quick-add],[data-add-product],[data-add],[data-quantity],

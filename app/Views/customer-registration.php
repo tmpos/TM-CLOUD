@@ -1,5 +1,6 @@
 <?php
 $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+$isCrm = !empty($request['crm_json']);
 $used = ($request['status'] ?? '') === 'used';
 $value = static fn (string $key, string $fallback = ''): string => $escape($_POST[$key] ?? $fallback);
 ?>
@@ -13,7 +14,7 @@ $value = static fn (string $key, string $fallback = ''): string => $escape($_POS
 </style>
 </head>
 <body><main class="wrap"><section class="card">
-<header class="head"><h1>Registro de cliente</h1><p><?= $escape($project['name'] ?? '') ?></p></header>
+<header class="head"><h1><?= $isCrm ? 'Cuentenos que busca' : 'Registro de cliente' ?></h1><p><?= $escape($project['name'] ?? '') ?></p></header>
 <div class="body">
 <?php if ($used): ?>
   <div class="success"><div class="icon">&#10003;</div><h2>Registro completado</h2><p>Sus datos fueron recibidos correctamente. Ya puede cerrar esta pagina.</p></div>
@@ -31,7 +32,13 @@ $value = static fn (string $key, string $fallback = ''): string => $escape($_POS
       <?php endforeach; ?>
     </select></div>
     <div class="full"><label>Direccion</label><textarea name="direccion" maxlength="300"><?= $value('direccion') ?></textarea></div>
-    <div class="full"><button type="submit">Completar registro</button></div>
+    <?php if ($isCrm): ?>
+    <div class="full"><label>Producto o servicio de interes *</label><input name="producto_interes" required maxlength="500" placeholder="Telefono, accesorio, electrodomestico o servicio" value="<?= $value('producto_interes') ?>"></div>
+    <div class="full"><label>Que necesita *</label><textarea name="necesidad" required maxlength="2000" placeholder="Cuente que busca, para que lo necesita y cuando le gustaria comprar."><?= $value('necesidad') ?></textarea></div>
+    <div style="display:none" aria-hidden="true"><input name="website" tabindex="-1" autocomplete="off"></div>
+    <div class="full"><label><input style="width:auto" type="checkbox" name="consentimiento" value="1" required> Autorizo que me contacten para atender esta consulta.</label></div>
+    <?php endif; ?>
+    <div class="full"><button type="submit"><?= $isCrm ? 'Enviar consulta' : 'Completar registro' ?></button></div>
   </div></form>
 <?php endif; ?>
 </div></section></main></body></html>

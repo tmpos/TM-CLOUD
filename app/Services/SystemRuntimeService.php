@@ -23,7 +23,7 @@ final class SystemRuntimeService
 
     private ?DateTimeZone $requestTimezone = null;
 
-    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks, private InvoiceSignatureService $signatures, private CustomerRegistrationService $customerRegistrations)
+    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks, private InvoiceSignatureService $signatures, private CustomerRegistrationService $customerRegistrations, private ?SpaAppointmentService $spaAppointments = null, private ?SpaLandingService $spaLanding = null, private ?StorefrontSettingsService $website = null, private ?WebsiteOrdersService $websiteOrders = null)
     {
     }
 
@@ -62,7 +62,8 @@ final class SystemRuntimeService
         $channel = (string) ($input['channel'] ?? '');
         if (str_starts_with($channel, 'db:get') || in_array($channel, [
             'config:get', 'auth:login', 'caja:getTurnoActivo', 'caja:getTurnoAbierto',
-            'facturas:obtenerFirma',
+            'facturas:obtenerFirma', 'web:listarPedidos', 'web:detallePedido',
+            'spa:obtenerHorarios', 'spa:obtenerLanding', 'spa:disponibilidad', 'spa:listarCitas', 'web:obtenerConfiguracion',
             'cuadre:listar', 'cuadre:ventasTurno', 'cuadre:gastosTurno', 'app:getName',
             'app:getVersion', 'getServerUrl', 'getPrinters', 'scan:bluetooth',
         ], true)) return false;
@@ -243,10 +244,23 @@ final class SystemRuntimeService
 
     private function invoke(PDO $db, array $project, string $channel, array $args, array $actor): mixed
     {
+        if (in_array($channel, ['web:listarPedidos', 'web:detallePedido'], true)) {
+            if (!$this->websiteOrders) throw new RuntimeException('Consulta de pedidos web no disponible.');
+            return ['success' => true, 'data' => $this->websiteOrders->handle($project, $channel === 'web:listarPedidos' ? 'list' : 'detail', (array) ($args[0] ?? []))];
+        }
+        if ($channel === 'web:obtenerConfiguracion' || $channel === 'web:guardarConfiguracion') {
+            if (!$this->website) throw new RuntimeException('Configuración web no disponible.');
+            return ['success' => true, 'data' => $this->website->handle($project, $channel === 'web:guardarConfiguracion' ? 'save' : 'get', (array) ($args[0] ?? []))];
+        }
         if (in_array($channel, ['gastos:guardarContable','gastos:anularContable','gastos:pagarContable','gastos:revertirPagoContable','gastos:aprobarContable','gastos:consultarContabilidad','gastos:cerrarPeriodo','gastos:reabrirPeriodo','gastos:listarCuentas'], true)) return (new ExpenseAccountingService())->handle($db, $channel, (array) ($args[0] ?? []), $actor);
         if ($channel === 'auth:login') return $this->authLogin($db, (array) ($args[0] ?? []));
         if ($channel === 'config:get') return $this->configGet($db, (string) ($args[0] ?? ''));
         if ($channel === 'config:set') return $this->configSet($db, ['clave' => $args[0] ?? '', 'valor' => $args[1] ?? '', 'categoria' => $args[2] ?? 'general']);
+        $spaOperations = ['spa:obtenerHorarios' => 'get', 'spa:guardarHorarios' => 'save', 'spa:disponibilidad' => 'availability', 'spa:listarCitas' => 'appointments', 'spa:guardarCita' => 'appointment-save', 'spa:eliminarCita' => 'appointment-delete'];
+        if (isset($spaOperations[$channel])) return ['success' => true, 'data' => (new SpaScheduleService())->handle($project, $spaOperations[$channel], (array) ($args[0] ?? []), new RecordService($this->schema, $this->logs), $this->webhooks)];
+        if ($channel === 'citas:crearEnlaceSpa' && $this->spaAppointments) return ['success' => true, 'data' => $this->spaAppointments->create($project, (array) ($args[0] ?? []), (string) ($actor['email'] ?? $actor['usuario'] ?? 'system'))];
+        if ($channel === 'spa:obtenerLanding' && $this->spaLanding) return ['success' => true, 'data' => $this->spaLanding->get($project)];
+        if ($channel === 'spa:guardarLanding' && $this->spaLanding) return ['success' => true, 'data' => $this->spaLanding->save($project, (array) ($args[0] ?? []))];
         if ($channel === 'facturas:crearEnlacePdf') return $this->shareInvoice($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'facturas:crearEnlaceFirma') return $this->signatureInvoice($db, $project, (array) ($args[0] ?? []), true);
         if ($channel === 'facturas:obtenerFirma') return $this->signatureInvoice($db, $project, (array) ($args[0] ?? []), false);
@@ -273,6 +287,7 @@ final class SystemRuntimeService
         if ($channel === 'ajuste:realizar') return $this->ajustar($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'precio:registrarHistorial') return $this->registrarPrecios($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'otp-local:getConfig') return $this->otpStatus($db);
+        if ($channel === 'otp-local:validate') return ['success' => true, 'data' => ['valid' => (new ProjectOtpService())->validateSupportLogin($db, (string) ($args[0] ?? ''), $this->now())]];
         if ($channel === 'otp-local:saveConfig') return $this->saveOtpConfig($db, (array) ($args[0] ?? []));
         if (in_array($channel, ['facturas:solicitarOtpEliminar', 'telefonos:solicitarOtpEliminar'], true)) return $this->otpStatus($db);
         if (in_array($channel, ['facturas:confirmarOtpEliminar', 'telefonos:confirmarOtpEliminar'], true)) {
@@ -331,7 +346,7 @@ final class SystemRuntimeService
     {
         $credential = $mode === 'pin' ? (string) ($input['pin'] ?? '') : (string) ($input['password'] ?? '');
         if ($mode !== 'pin' && strtolower(trim((string) ($input['usuario'] ?? ''))) !== 'soporte') return null;
-        if (!$this->validateOtp($db, $credential)) return null;
+        if (!(new ProjectOtpService())->validateSupportLogin($db, $credential, $this->now())) return null;
         try {
             foreach ($db->query('SELECT * FROM usuarios')->fetchAll() as $user) {
                 $role = strtolower(trim((string) ($user['nivel_seguridad'] ?? $user['rol'] ?? '')));

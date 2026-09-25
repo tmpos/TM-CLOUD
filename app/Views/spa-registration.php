@@ -2,7 +2,7 @@
 $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 $done = ($request['status'] ?? '') === 'used' || $appointment !== null;
 $value = static fn (string $key, string $fallback = ''): string => $escape($_POST[$key] ?? $fallback);
-$hoy = gmdate('Y-m-d');
+$hoy = (new DateTimeImmutable('now', new DateTimeZone($scheduleSettings['timezone'] ?? 'America/Santo_Domingo')))->format('Y-m-d');
 ?>
 <!doctype html>
 <html lang="es">
@@ -24,9 +24,21 @@ $hoy = gmdate('Y-m-d');
   <form method="post" autocomplete="on"><div class="grid">
     <div class="full"><label>Nombre completo <span class="required">*</span></label><input name="nombre" maxlength="160" required value="<?= $value('nombre') ?>"></div>
     <div><label>Telefono <span class="required">*</span></label><input name="telefono" inputmode="tel" maxlength="24" required value="<?= $value('telefono', (string) ($request['phone'] ?? '')) ?>"></div>
-    <div><label>Servicio deseado</label><input name="servicio" maxlength="160" value="<?= $value('servicio') ?>" placeholder="Ej. Masaje, manicure..."></div>
+    <div><label for="spa-service">Servicio deseado <span class="required">*</span></label>
+      <select id="spa-service" name="servicio_uid" required>
+        <option value=""><?= empty($services) ? 'No hay servicios disponibles' : 'Selecciona un servicio' ?></option>
+        <?php foreach ($services as $service): ?>
+        <option value="<?= $escape($service['uid']) ?>" <?= (string) ($_POST['servicio_uid'] ?? '') === $service['uid'] ? 'selected' : '' ?>><?= $escape($service['nombre']) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <?php if (empty($services)): ?><p class="note">Contacta al spa para consultar sus servicios.</p><?php endif; ?>
+    </div>
     <div><label>Fecha deseada <span class="required">*</span></label><input name="fecha" type="date" min="<?= $escape($hoy) ?>" required value="<?= $value('fecha') ?>"></div>
+    <?php if ($scheduleSettings['enabled'] ?? false): ?>
+    <?php require __DIR__ . '/spa-shift-picker.php'; ?>
+    <?php else: ?>
     <div><label>Hora deseada <span class="required">*</span></label><input name="hora" type="time" required value="<?= $value('hora') ?>"></div>
+    <?php endif; ?>
     <div class="full"><label>Nota (opcional)</label><textarea name="nota" maxlength="500"><?= $value('nota') ?></textarea></div>
     <div class="full"><button type="submit">Solicitar cita</button></div>
   </div></form>
