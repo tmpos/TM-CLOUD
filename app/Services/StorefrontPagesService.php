@@ -17,7 +17,7 @@ final class StorefrontPagesService
     ];
     public static function fields(): array
     {
-        return [...array_values(array_filter(array_column(self::PAGES, 'field'))), 'contact_hours'];
+        return [...array_values(array_filter(array_column(self::PAGES, 'field'))), 'contact_hours', 'map_embed_url'];
     }
     public static function decode(array $store): array
     {
@@ -34,8 +34,29 @@ final class StorefrontPagesService
             if (!is_string($value)) throw new \InvalidArgumentException('El contenido de las páginas debe ser texto.');
             $value = trim($value);
             if (mb_strlen($value) > 16000) throw new \InvalidArgumentException('Cada página admite hasta 16000 caracteres.');
+            if ($field === 'map_embed_url') $value = self::mapUrl($value);
             $content[$field] = $value;
         }
         return json_encode($content, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    }
+
+    public static function mapUrl(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') return '';
+        if (str_starts_with($value, '<')) {
+            preg_match('/\bsrc\s*=\s*["\']([^"\']+)["\']/i', $value, $match);
+            $value = $match[1] ?? '';
+        }
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $url = parse_url($value);
+        parse_str($url['query'] ?? '', $query);
+        if (!$url || ($url['scheme'] ?? '') !== 'https' || ($url['host'] ?? '') !== 'www.google.com'
+            || ($url['path'] ?? '') !== '/maps/embed' || isset($url['pass'])
+            || isset($url['user']) || isset($url['port']) || !is_string($query['pb'] ?? null) || trim($query['pb']) === ''
+            || preg_match('/[\x00-\x20<>"\']/', $value)) {
+            throw new \InvalidArgumentException('Usa Google Maps → Compartir → Insertar un mapa → Copiar HTML para configurar la ubicación.');
+        }
+        return $value;
     }
 }

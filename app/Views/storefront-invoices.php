@@ -29,4 +29,5 @@
     <a class="register-link" href="/store/<?= e($store['slug']) ?>/register">Crear mi cuenta</a>
     <div class="note"><span>🔒</span><span><b>Sesión privada.</b> Tus datos se mantendrán disponibles hasta que cierres sesión.</span></div>
 </form></section>
-</main></body></html>
+</main><?php require __DIR__ . '/storefront-contact-actions.php'; ?>
+</body></html>

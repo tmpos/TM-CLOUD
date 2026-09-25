@@ -15,4 +15,5 @@
 </form>
 <form class="resend" method="post" action="/store/<?= e($store['slug']) ?>/verify/resend"><input type="hidden" name="_csrf" value="<?= e(Csrf::token()) ?>"><button type="submit">Enviar un código nuevo</button></form>
 <p class="note">El código vence en 10 minutos y permite hasta 5 intentos.</p><a class="back" href="/store/<?= e($store['slug']) ?>">← Volver a la tienda</a>
-</main></body></html>
+</main><?php require __DIR__ . '/storefront-contact-actions.php'; ?>
+</body></html>

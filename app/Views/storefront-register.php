@@ -35,4 +35,5 @@
 </form></section>
 </main>
 <script>document.querySelector('[data-uppercase]')?.addEventListener('input',event=>{const start=event.target.selectionStart;event.target.value=event.target.value.toLocaleUpperCase('es');event.target.setSelectionRange(start,start)});</script>
+<?php require __DIR__ . '/storefront-contact-actions.php'; ?>
 </body></html>

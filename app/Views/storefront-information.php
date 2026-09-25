@@ -6,6 +6,9 @@ $whatsapp = preg_replace('/\D/', '', (string) ($store['whatsapp'] ?? ''));
 $email = filter_var($store['email'] ?? '', FILTER_VALIDATE_EMAIL) ? $store['email'] : '';
 $policyKeys = ['privacidad', 'terminos', 'envios', 'devoluciones', 'garantias'];
 $canonical = rtrim((string) $store['url'], '/') . '/pages/' . $page;
+$mapUrl = '';
+try { $mapUrl = \App\Services\StorefrontPagesService::mapUrl((string) ($store['map_embed_url'] ?? '')); }
+catch (\InvalidArgumentException) { /* No publicar mapas inválidos de datos antiguos. */ }
 ?>
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -26,12 +29,19 @@ $canonical = rtrim((string) $store['url'], '/') . '/pages/' . $page;
 <?php if($page==='contacto'): ?>
 <?php require __DIR__ . '/storefront-contact-form.php'; ?>
 <div class="cards" style="margin-top:24px">
-<?php if($whatsapp): ?><a class="contact-card" href="https://wa.me/<?= e($whatsapp) ?>" target="_blank" rel="noopener"><small>Hablemos</small><strong>WhatsApp</strong><span>Iniciar conversación ↗</span></a><?php endif; ?>
+<?php if($whatsapp): ?><a class="contact-card" href="https://wa.me/<?= e($whatsapp) ?>" target="_blank" rel="noopener"><?php require __DIR__ . '/storefront-whatsapp-icon.php'; ?> <small>Hablemos</small><strong>WhatsApp</strong><span>Iniciar conversación ↗</span></a><?php endif; ?>
 <?php if($phone): ?><a class="contact-card" href="tel:<?= e($phone) ?>"><small>Llámanos</small><strong><?= e($store['phone']) ?></strong><span>Realizar llamada →</span></a><?php endif; ?>
 <?php if($email): ?><a class="contact-card" href="mailto:<?= e($email) ?>"><small>Escríbenos</small><strong><?= e($email) ?></strong><span>Enviar correo →</span></a><?php endif; ?>
 <?php if($store['address']): ?><a class="contact-card" href="https://www.google.com/maps/search/?api=1&amp;query=<?= rawurlencode($store['address']) ?>" target="_blank" rel="noopener"><small>Encuéntranos</small><strong><?= e($store['address']) ?></strong><span>Ver ubicación ↗</span></a><?php endif; ?>
 </div>
 <?php if(!empty($store['contact_hours'])): ?><h2 class="section-title">Horario de atención</h2><div class="panel hours"><?= e($store['contact_hours']) ?></div><?php endif; ?>
+<?php if($mapUrl !== ''): ?>
+<section aria-labelledby="store-location-title" style="margin-top:32px">
+  <h2 id="store-location-title" class="section-title">Dónde estamos</h2>
+  <?php if(!empty($store['address'])): ?><p class="muted"><?= e($store['address']) ?></p><?php endif; ?>
+  <iframe src="<?= e($mapUrl) ?>" title="Ubicación de <?= e($store['store_name']) ?>" width="100%" height="360" style="display:block;border:1px solid #8882;border-radius:var(--radius)" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+</section>
+<?php endif; ?>
 <?php if($store['instagram_url'] || $store['facebook_url']): ?><h2 class="section-title">Síguenos</h2><?php foreach(['instagram_url'=>'Instagram','facebook_url'=>'Facebook'] as $key=>$label): ?><?php if($store[$key]): ?><a class="action" href="<?= e($store[$key]) ?>" target="_blank" rel="noopener"><?= e($label) ?> ↗</a> <?php endif; ?><?php endforeach; ?><?php endif; ?>
 <?php if(!$whatsapp && !$phone && !$email && !$store['address']): ?><p class="muted">Los datos de contacto aún no están publicados.</p><?php endif; ?>
 <?php endif; ?>
@@ -45,4 +55,5 @@ $canonical = rtrim((string) $store['url'], '/') . '/pages/' . $page;
 <?php if($page!=='contacto'): ?><section class="help"><h2>¿Necesitas ayuda?</h2><p>Habla con nuestro equipo para resolver tus dudas.</p><a class="action" href="<?= e($base) ?>/pages/contacto">Ver canales de contacto</a></section><?php endif; ?>
 </article><aside class="side panel"><h2>Conoce la tienda</h2><?php foreach(\App\Services\StorefrontPagesService::PAGES as $key=>$item): ?><a href="<?= e($base) ?>/pages/<?= e($key) ?>" <?= $page===$key?'aria-current="page"':'' ?>><?= e($item['title']) ?></a><?php endforeach; ?></aside></div></main>
 <footer class="footer"><div class="wrap"><div class="footer-head"><div><strong><?= e($store['store_name']) ?></strong><p><?= e($store['footer_text'] ?: $store['tagline']) ?></p></div><a href="<?= e($base) ?>/categories">Volver al catálogo →</a></div><?php require __DIR__.'/storefront-credit.php'; ?><div class="copyright">© <?= date('Y') ?> <?= e($store['store_name']) ?>. Todos los derechos reservados.</div></div></footer>
+<?php require __DIR__ . '/storefront-contact-actions.php'; ?>
 </body></html>
