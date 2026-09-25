@@ -29,3 +29,10 @@ Release files and previous application snapshot are under
 `/opt/tmpos-contact-map-20260925` on the VPS. Production storage was not
 modified by the release tests. Map configuration is optional and no new
 schema migration is required.
+
+## Floating button spacing follow-up
+
+Published `contact-buttons-20260925` over `contact-map-20260925`.
+The back-to-top control sits above contact/WhatsApp (92px desktop, 152px
+plus safe-area on mobile), clearing the existing bottom navigation.
+The public barbaroja contact page now returns the configured Google Maps iframe.
