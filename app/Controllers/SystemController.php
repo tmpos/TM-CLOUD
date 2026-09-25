@@ -128,7 +128,9 @@ final class SystemController
                     );
                     $base = '/sistema/' . rawurlencode((string) $project['slug']) . '/';
                 }
-                $systemBootstrap = '<base href="' . htmlspecialchars($base, ENT_QUOTES) . '">';
+                $systemBootstrap = '<base href="' . htmlspecialchars($base, ENT_QUOTES) . '">'
+                    // PWA: manifest propio del proyecto para instalar /sistema/{slug}/ como app.
+                    . '<link rel="manifest" href="/sistema/' . rawurlencode((string) $project['slug']) . '/manifest.webmanifest">';
                 if (empty($app['is_default'])) {
                     $context = json_encode([
                         'slug' => (string) $project['slug'],
@@ -155,6 +157,42 @@ final class SystemController
                 echo 'Sistema no encontrado.';
             }
         };
+        // Manifest PWA por proyecto: start_url y scope deben ser /sistema/{slug}/,
+        // por eso no puede ser un archivo estatico de la build. Se registra antes
+        // de /sistema/@slug/* para que no lo atrape la ruta de la app. Es publico
+        // (el navegador lo pide sin cookies) y solo expone el nombre del proyecto.
+        Flight::route('GET /sistema/@slug/manifest.webmanifest', function ($slug): void {
+            try {
+                $project = $this->projectBySlug((string) $slug);
+                $app = $this->systemApps->find((string) ($project['system_app'] ?? 'default'));
+                $scope = '/sistema/' . rawurlencode((string) $project['slug']) . '/';
+                $icons = rtrim((string) $app['url'], '/') . '/assets/pwa/';
+                $name = trim((string) ($project['name'] ?? '')) ?: 'TMPOS';
+                header('Content-Type: application/manifest+json; charset=UTF-8');
+                header('Cache-Control: public, max-age=3600');
+                echo json_encode([
+                    'id' => $scope,
+                    'name' => $name . ' - TMPOS',
+                    'short_name' => mb_substr($name, 0, 24),
+                    'description' => 'Punto de venta, inventario y facturacion TMPOS',
+                    'lang' => 'es',
+                    'start_url' => $scope,
+                    'scope' => $scope,
+                    'display' => 'standalone',
+                    'background_color' => '#ffffff',
+                    'theme_color' => '#1e3a8a',
+                    'icons' => [
+                        ['src' => $icons . 'icon-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
+                        ['src' => $icons . 'icon-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],
+                        ['src' => $icons . 'maskable-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable'],
+                    ],
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            } catch (\Throwable $e) {
+                http_response_code(404);
+                header('Content-Type: application/json; charset=UTF-8');
+                echo '{}';
+            }
+        });
         Flight::route('GET /sistema/@slug', $serveApp);
         Flight::route('GET /sistema/@slug/', $serveApp);
         Flight::route('GET /sistema/@slug/*', $serveApp);

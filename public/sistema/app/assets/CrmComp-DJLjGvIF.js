@@ -1,0 +1,1 @@
+import{P as e,l as t,v as n}from"./runtime-core.esm-bundler-EoPqhpgY.js";import{t as r}from"./CrmWorkspace-B5glDnWy.js";var i=n({__name:`CrmComp`,setup(n){return(n,i)=>(e(),t(r))}});export{i as default};
