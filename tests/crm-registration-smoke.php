@@ -21,7 +21,7 @@ check($qr['crm'] && $qr['reusable']);
 $parent = $service->resolve(basename($qr['url']));
 $child = $service->create($project,['crm'=>json_decode($parent['crm_json'],true)],'printed-qr',true);
 $request = $service->resolve(basename($child['url']));
-$input = ['nombre'=>'Cliente CRM','telefono'=>'8095550188','producto_interes'=>'iPhone y cargador','necesidad'=>'Para trabajar','consentimiento'=>'1','vendedor_uid'=>'intruder'];
+$input = ['nombre'=>'Cliente CRM','telefono'=>'8095550188','documento'=>'00112345678','producto_interes'=>'iPhone y cargador','necesidad'=>'Para trabajar','consentimiento'=>'1','vendedor_uid'=>'intruder'];
 try { $service->complete($request,$project,[...$input,'consentimiento'=>'']); throw new LogicException('Consent ignored'); } catch (InvalidArgumentException) {}
 check(count($records->all($project,'clientes')) === 0);
 $customer = $service->complete($request,$project,$input);

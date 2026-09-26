@@ -62,7 +62,7 @@ final class SystemRuntimeService
         $channel = (string) ($input['channel'] ?? '');
         if (str_starts_with($channel, 'db:get') || in_array($channel, [
             'config:get', 'auth:login', 'caja:getTurnoActivo', 'caja:getTurnoAbierto',
-            'facturas:obtenerFirma', 'web:listarPedidos', 'web:detallePedido',
+            'facturas:obtenerFirma', 'web:listarPedidos', 'web:detallePedido', 'clientes:obtenerFormulario',
             'spa:obtenerHorarios', 'spa:obtenerLanding', 'spa:disponibilidad', 'spa:listarCitas', 'web:obtenerConfiguracion',
             'cuadre:listar', 'cuadre:ventasTurno', 'cuadre:gastosTurno', 'app:getName',
             'app:getVersion', 'getServerUrl', 'getPrinters', 'scan:bluetooth',
@@ -244,6 +244,13 @@ final class SystemRuntimeService
 
     private function invoke(PDO $db, array $project, string $channel, array $args, array $actor): mixed
     {
+        if (in_array($channel, ['clientes:obtenerFormulario', 'clientes:guardarFormulario'], true)) {
+            if ($channel === 'clientes:guardarFormulario' && $actor) {
+                $roles = array_map(fn ($value) => strtolower(trim((string) $value)), [$actor['rol'] ?? '', $actor['nivel_seguridad'] ?? '']);
+                if (!array_intersect($roles, ['administrador', 'admin', 'soporte'])) throw new RuntimeException('Solo Administrador o Soporte puede configurar el formulario.', 403);
+            }
+            return ['success' => true, 'data' => $this->customerRegistrations->settings($project, $channel === 'clientes:guardarFormulario' ? (array) ($args[0] ?? []) : null)];
+        }
         if (in_array($channel, ['web:listarPedidos', 'web:detallePedido'], true)) {
             if (!$this->websiteOrders) throw new RuntimeException('Consulta de pedidos web no disponible.');
             return ['success' => true, 'data' => $this->websiteOrders->handle($project, $channel === 'web:listarPedidos' ? 'list' : 'detail', (array) ($args[0] ?? []))];

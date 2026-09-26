@@ -34,19 +34,20 @@ final class CrmRegistrationService
         return $seller;
     }
 
-    public function validate(array $input): void
+    public function validate(array $input, ?array $fields = null): void
     {
         foreach (['producto_interes'=>500, 'necesidad'=>2000] as $key=>$max) {
+            if (!is_scalar($input[$key] ?? '')) throw new InvalidArgumentException('Campo CRM no válido.');
             $value = trim((string) ($input[$key] ?? ''));
-            if ($value === '' || mb_strlen($value) > $max) throw new InvalidArgumentException('Indique el producto de interes y que necesita (maximo 500 y 2000 caracteres).');
+            if (($value === '' && ($fields[$key]['required'] ?? true)) || mb_strlen($value) > $max) throw new InvalidArgumentException('Indique el producto de interes y que necesita (maximo 500 y 2000 caracteres).');
         }
         if (!empty($input['website'])) throw new InvalidArgumentException('Solicitud no valida.');
         if (($input['consentimiento'] ?? '') !== '1') throw new InvalidArgumentException('Autorice que le contactemos para atender su consulta.');
     }
 
-    public function complete(array $project, array $request, array $candidate, array $input): array
+    public function complete(array $project, array $request, array $candidate, array $input, ?array $fields = null): array
     {
-        $this->validate($input);
+        $this->validate($input, $fields);
         $config = json_decode((string) $request['crm_json'], true, 512, JSON_THROW_ON_ERROR);
         $seller = $this->seller($project, $config['vendedor_uid']);
         $db = $this->schema->connection($project);
@@ -62,9 +63,9 @@ final class CrmRegistrationService
             $customer = $this->records->create($project, 'clientes', ['uid'=>$customerUid, ...$candidate], false);
             $lead = $this->records->create($project, 'crm_prospectos', [
                 'uid'=>$leadUid, 'cliente_uid'=>$customer['uid'], 'nombre'=>$candidate['nombre'],
-                'telefono'=>$candidate['telefono'], 'email'=>$candidate['email'] ?? '',
+                'telefono'=>$candidate['telefono'] ?? '', 'email'=>$candidate['email'] ?? '',
                 'direccion'=>$candidate['direccion'] ?? '', 'rnc'=>$candidate['rnc'] ?? '',
-                'necesidad'=>trim((string)$input['necesidad']), 'producto_interes'=>trim((string)$input['producto_interes']),
+                'necesidad'=>trim((string)($input['necesidad'] ?? '')), 'producto_interes'=>trim((string)($input['producto_interes'] ?? '')),
                 'productos_interes'=>'[]', 'presupuesto'=>0, 'origen'=>'Formulario web', 'prioridad'=>'NORMAL',
                 ...$seller, 'creado_por'=>'formulario_publico',
             ], false);

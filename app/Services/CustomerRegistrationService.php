@@ -20,6 +20,14 @@ final class CustomerRegistrationService
         private WebhookService $webhooks,
     ) {}
 
+    public function settings(array $project, ?array $input = null, array $request = []): array
+    {
+        $service = new CustomerRegistrationSettingsService($this->schema);
+        $branding = $service->branding($project, $request);
+        if (str_starts_with($branding['logo_url'], '/')) $branding['logo_url'] = rtrim((string) ($this->config['url'] ?? ''), '/') . $branding['logo_url'];
+        return ['settings' => $input === null ? $service->get($project) : $service->save($project, $input), 'branding' => $branding];
+    }
+
     public function create(array $project, array $input, string $createdBy = '', bool $allowEmptyPhone = false): array
     {
         $crm = !empty($input['crm']) ? (new CrmRegistrationService($this->schema, $this->records, $this->logs, $this->webhooks))->prepare($project, (array) $input['crm']) : null;
@@ -68,13 +76,26 @@ final class CustomerRegistrationService
     {
         if (!empty($request['reusable'])) throw new RuntimeException('Abra el QR para iniciar un registro individual.', 409);
         if (($request['status'] ?? '') === 'used') throw new RuntimeException('Este enlace ya fue utilizado.', 409);
+        $fields = (new CustomerRegistrationSettingsService($this->schema))->get($project)['fields'];
+        // Hidden fields cannot be injected through a direct POST.
+        foreach ($fields as $key => $field) {
+            if (!$field['visible']) $input[$key] = '';
+        }
+        if (!$fields['documento']['visible']) unset($input['rnc']);
+        if (!array_key_exists('documento', $input)) $input['documento'] = $input['rnc'] ?? '';
+        if (!array_key_exists('telefono', $input)) $input['telefono'] = $request['phone'] ?? '';
+        foreach (['nombre' => 'el nombre', 'telefono' => 'el teléfono', 'documento' => 'la cédula o RNC', 'email' => 'el correo electrónico', 'direccion' => 'la dirección', 'tipo_cliente' => 'el tipo de cliente'] as $key => $label) {
+            if (!is_scalar($input[$key] ?? '')) throw new InvalidArgumentException('El campo ' . $label . ' no es válido.');
+            if ($fields[$key]['required'] && trim((string) ($input[$key] ?? '')) === '') throw new InvalidArgumentException('Indique ' . $label . ' del cliente.');
+        }
         $name = mb_strtoupper(trim((string) ($input['nombre'] ?? '')), 'UTF-8');
         if (mb_strlen($name) < 2 || mb_strlen($name) > 160) throw new InvalidArgumentException('Indique un nombre valido (2 a 160 caracteres).');
         $phone = self::phone((string) ($input['telefono'] ?? $request['phone'] ?? ''));
-        if ($phone === '') throw new InvalidArgumentException('Indique un telefono valido.');
+        if ($phone === '' && ($fields['telefono']['required'] || trim((string) ($input['telefono'] ?? '')) !== '')) throw new InvalidArgumentException('Indique un telefono valido.');
         $email = strtolower(trim((string) ($input['email'] ?? '')));
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('El correo electronico no es valido.');
         $document = preg_replace('/\D+/', '', (string) ($input['documento'] ?? $input['rnc'] ?? '')) ?: '';
+        if ($document === '' && ($fields['documento']['required'] || trim((string) ($input['documento'] ?? '')) !== '')) throw new InvalidArgumentException('Indique la cédula o RNC del cliente.');
         if (strlen($document) > 20) throw new InvalidArgumentException('El documento no es valido.');
         $address = mb_strtoupper(trim((string) ($input['direccion'] ?? '')), 'UTF-8');
         if (mb_strlen($address) > 300) throw new InvalidArgumentException('La direccion es demasiado larga.');
@@ -82,7 +103,7 @@ final class CustomerRegistrationService
         $allowedTypes = ['NORMAL', 'CONSUMO', 'FISCAL', 'GUBERNAMENTAL', 'REGIMEN_ESPECIAL', 'EXPORTACION'];
         if (!in_array($type, $allowedTypes, true)) $type = 'NORMAL';
 
-        if (!empty($request['crm_json'])) (new CrmRegistrationService($this->schema, $this->records, $this->logs, $this->webhooks))->validate($input);
+        if (!empty($request['crm_json'])) (new CrmRegistrationService($this->schema, $this->records, $this->logs, $this->webhooks))->validate($input, $fields);
         $claim = $this->db->prepare("UPDATE customer_registration_requests SET status='processing' WHERE uid=? AND status='pending' AND expires_at>?");
         $claim->execute([$request['uid'], gmdate('Y-m-d H:i:s')]);
         if ($claim->rowCount() !== 1) throw new RuntimeException('El enlace ya fue utilizado o expiro.', 409);
@@ -108,7 +129,7 @@ final class CustomerRegistrationService
                 if ($value === '' && !in_array($key, ['email', 'direccion', 'rnc', 'cedula'], true)) unset($data[$key]);
             }
             $customer = !empty($request['crm_json'])
-                ? (new CrmRegistrationService($this->schema, $this->records, $this->logs, $this->webhooks))->complete($project, $request, $data, $input)
+                ? (new CrmRegistrationService($this->schema, $this->records, $this->logs, $this->webhooks))->complete($project, $request, $data, $input, $fields)
                 : $this->records->create($project, 'clientes', $data);
             $now = Support::now();
             $this->db->prepare("UPDATE customer_registration_requests SET status='used',customer_uid=?,used_at=? WHERE uid=? AND status='processing'")

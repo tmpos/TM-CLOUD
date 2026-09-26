@@ -351,6 +351,19 @@ final class ApiController
             });
         }
 
+        foreach (['get', 'save'] as $operation) {
+            Flight::route('POST /api/license/customer-registration-settings/' . $operation, function () use ($operation): void {
+                try {
+                    $input = Http::input();
+                    $project = $this->licensedProject($input, 'license-customer-form-' . $operation);
+                    Flight::json(['data' => $this->customerRegistrations->settings($project, $operation === 'save' ? $input : null)]);
+                } catch (\Throwable $e) {
+                    $status = in_array($e->getCode(), [401, 403, 404, 409, 423, 429], true) ? $e->getCode() : 422;
+                    Flight::json(['error' => $e->getMessage()], $status);
+                }
+            });
+        }
+
         Flight::route('POST /api/license/spa-landing-settings/get', function (): void {
             try {
                 $input = Http::input();
@@ -874,6 +887,7 @@ final class ApiController
             $this->keys->rateLimitPublic('register-customer:' . hash('sha256', $token), 30);
             $request = $this->customerRegistrations->resolve($token);
             $project = $this->projects->findActive((string) $request['project_uid']);
+            $presentation = $this->customerRegistrations->settings($project, null, $request);
             if (!$submit && !empty($request['reusable'])) {
                 $individual = $this->customerRegistrations->create($project, [
                     'almacen_id' => $request['almacen_id'],
