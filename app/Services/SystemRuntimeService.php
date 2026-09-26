@@ -62,7 +62,7 @@ final class SystemRuntimeService
         $channel = (string) ($input['channel'] ?? '');
         if (str_starts_with($channel, 'db:get') || in_array($channel, [
             'config:get', 'auth:login', 'caja:getTurnoActivo', 'caja:getTurnoAbierto',
-            'facturas:obtenerFirma', 'web:listarPedidos', 'web:detallePedido', 'clientes:obtenerFormulario',
+            'facturas:obtenerFirma', 'web:listarPedidos', 'web:detallePedido', 'clientes:obtenerFormulario', 'documentos:obtenerDiseno',
             'spa:obtenerHorarios', 'spa:obtenerLanding', 'spa:disponibilidad', 'spa:listarCitas', 'web:obtenerConfiguracion',
             'cuadre:listar', 'cuadre:ventasTurno', 'cuadre:gastosTurno', 'app:getName',
             'app:getVersion', 'getServerUrl', 'getPrinters', 'scan:bluetooth',
@@ -250,6 +250,13 @@ final class SystemRuntimeService
                 if (!array_intersect($roles, ['administrador', 'admin', 'soporte'])) throw new RuntimeException('Solo Administrador o Soporte puede configurar el formulario.', 403);
             }
             return ['success' => true, 'data' => $this->customerRegistrations->settings($project, $channel === 'clientes:guardarFormulario' ? (array) ($args[0] ?? []) : null)];
+        }
+        if (in_array($channel, ['documentos:obtenerDiseno', 'documentos:guardarDiseno'], true)) {
+            if ($channel === 'documentos:guardarDiseno' && $actor) {
+                $roles = array_map(fn ($value) => strtolower(trim((string) $value)), [$actor['rol'] ?? '', $actor['nivel_seguridad'] ?? '']);
+                if (!array_intersect($roles, ['administrador', 'admin', 'soporte'])) throw new RuntimeException('Solo Administrador o Soporte puede configurar los documentos.', 403);
+            }
+            return ['success' => true, 'data' => ['settings' => $channel === 'documentos:guardarDiseno' ? (new DocumentSettingsService($this->schema))->save($project, (array) ($args[0] ?? [])) : (new DocumentSettingsService($this->schema))->get($project)]];
         }
         if (in_array($channel, ['web:listarPedidos', 'web:detallePedido'], true)) {
             if (!$this->websiteOrders) throw new RuntimeException('Consulta de pedidos web no disponible.');

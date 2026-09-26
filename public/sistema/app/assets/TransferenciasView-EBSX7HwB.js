@@ -1,1 +1,0 @@
-import{P as e,d as t,g as n,v as r}from"./runtime-core.esm-bundler-EoPqhpgY.js";import{t as i}from"./TransferenciasComp-3Z9W76Ts.js";var a=r({__name:`TransferenciasView`,setup(r){return(r,a)=>(e(),t(`div`,null,[n(i)]))}});export{a as default};

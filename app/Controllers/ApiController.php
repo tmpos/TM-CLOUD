@@ -364,6 +364,19 @@ final class ApiController
             });
         }
 
+        foreach (['get', 'save'] as $operation) {
+            Flight::route('POST /api/license/document-settings/' . $operation, function () use ($operation): void {
+                try {
+                    $input = Http::input();
+                    $project = $this->licensedProject($input, 'license-document-settings-' . $operation);
+                    Flight::json(['data' => ['settings' => $operation === 'save' ? (new \App\Services\DocumentSettingsService($this->schema))->save($project, $input) : (new \App\Services\DocumentSettingsService($this->schema))->get($project)]]);
+                } catch (\Throwable $e) {
+                    $status = in_array($e->getCode(), [401, 403, 404, 409, 423, 429], true) ? $e->getCode() : 422;
+                    Flight::json(['error' => $e->getMessage()], $status);
+                }
+            });
+        }
+
         Flight::route('POST /api/license/spa-landing-settings/get', function (): void {
             try {
                 $input = Http::input();
@@ -1103,7 +1116,7 @@ final class ApiController
             header('Cache-Control: private, no-cache, must-revalidate');
             header('X-Robots-Tag: noindex, nofollow');
             header('Content-Type: ' . ($asPdf ? 'application/pdf' : 'text/html; charset=UTF-8'));
-            if ($asPdf) header('Content-Disposition: inline; filename="factura.pdf"');
+            if ($asPdf) header('Content-Disposition: inline; filename="' . $this->pdf->documentFilename($invoice) . '"');
             echo $content;
         } catch (\Throwable) {
             http_response_code(404);

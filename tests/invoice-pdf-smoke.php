@@ -118,6 +118,40 @@ try {
         }
     }
 
+    // POS references use cod_cliente or UID, and the tax ID must come from the customer.
+    foreach (['cod_cliente' => '1', 'cliente_uid' => 'rec_cliente'] as $reference => $value) {
+        $posInvoice = $inlineInvoice;
+        unset($posInvoice['cliente_id']);
+        $posInvoice[$reference] = $value;
+        $posHtml = $service->invoiceHtml($project, $posInvoice);
+        foreach (['Cliente de prueba', '00112345678', 'Santo Domingo', '809-555-0202', 'cliente@example.com'] as $expected) {
+            if (!str_contains($posHtml, $expected)) throw new RuntimeException("POS client field missing: $expected");
+        }
+    }
+    $unknownClient = $inlineInvoice;
+    unset($unknownClient['cliente_id']);
+    $unknownClient['cod_cliente'] = '99999';
+    $unknownClient['nombre_cliente'] = 'Cliente no registrado';
+    $unknownHtml = $service->invoiceHtml($project, $unknownClient);
+    if (str_contains($unknownHtml, '00112345678') || str_contains($unknownHtml, 'cliente@example.com')) throw new RuntimeException('Unrelated customer data leaked into document.');
+    $snapshot = $unknownClient + ['rnc_cliente' => '987654321', 'email_cliente' => 'snapshot@example.com'];
+    foreach (['987654321', 'snapshot@example.com'] as $expected) if (!str_contains($service->invoiceHtml($project, $snapshot), $expected)) throw new RuntimeException('Customer snapshot missing.');
+
+    $designs = new \App\Services\DocumentSettingsService($schema);
+    $customDesign = $designs->save($project, array_merge($designs::defaults(), ['primary_color' => '#aa2244', 'heading_color' => '#112233', 'show_logo' => false, 'quote_validity_days' => 45]));
+    if ($designs->get($project) !== $customDesign) throw new RuntimeException('Document design did not persist.');
+    try { $designs->save($project, ['primary_color' => '#000000; color:red']); throw new RuntimeException('Unsafe color accepted.'); } catch (InvalidArgumentException) {}
+    $quote = array_merge($inlineInvoice, ['tipo_factura' => 'COTIZACION', 'no_factura' => 'F000123']);
+    $quoteHtml = $service->invoiceHtml($project, $quote);
+    foreach (['COT000123', '45', '#aa2244', '#112233', '00112345678', 'cliente@example.com'] as $expected) if (!str_contains($quoteHtml, $expected)) throw new RuntimeException("Quote field missing: $expected");
+    foreach (['<barcode', 'E320000000005', 'AJIz2R', 'ENTREGADO POR', 'RESUMEN DE PAGO', 'class="logo"'] as $unexpected) if (str_contains($quoteHtml, $unexpected)) throw new RuntimeException("Invoice content in quotation: $unexpected");
+    if (preg_match('/\bfactura\b/i', strip_tags($quoteHtml))) throw new RuntimeException('Invoice wording in quotation.');
+    if ($service->documentFilename($quote) !== 'Cotizacion_COT000123.pdf') throw new RuntimeException('Wrong quote filename.');
+    $quotePdf = $service->invoice($project, 'facturas', $quote);
+    if (!str_starts_with($quotePdf, '%PDF-')) throw new RuntimeException('Invalid quote PDF.');
+    if (getenv('INVOICE_PDF_PREVIEW')) file_put_contents(getenv('INVOICE_PDF_PREVIEW') . '.quote.pdf', $quotePdf);
+    $designs->save($project, $designs::defaults());
+
     $inlineContent = $service->invoice($project, 'facturas', $inlineInvoice);
     if (!str_starts_with($inlineContent, '%PDF-') || strlen($inlineContent) < 10000) {
         throw new RuntimeException('The invoice PDF with inline products is invalid.');
@@ -129,6 +163,8 @@ try {
     $previewPath = getenv('INVOICE_PDF_PREVIEW');
     if (is_string($previewPath) && $previewPath !== '') {
         file_put_contents($previewPath, $content);
+        file_put_contents($previewPath . '.html', $html);
+        file_put_contents($previewPath . '.quote.html', $quoteHtml);
     }
     $invoiceWithoutReceipt = $invoice;
     $invoiceWithoutReceipt['ncf'] = '';
