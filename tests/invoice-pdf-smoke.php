@@ -141,10 +141,10 @@ try {
     $customDesign = $designs->save($project, array_merge($designs::defaults(), ['primary_color' => '#aa2244', 'heading_color' => '#112233', 'show_logo' => false, 'quote_validity_days' => 45]));
     if ($designs->get($project) !== $customDesign) throw new RuntimeException('Document design did not persist.');
     try { $designs->save($project, ['primary_color' => '#000000; color:red']); throw new RuntimeException('Unsafe color accepted.'); } catch (InvalidArgumentException) {}
-    $quote = array_merge($inlineInvoice, ['tipo_factura' => 'COTIZACION', 'no_factura' => 'F000123']);
+    $quote = array_merge($inlineInvoice, ['tipo_factura' => 'COTIZACION', 'no_factura' => 'F000123', 'fecha_vencimiento' => '2026-10-31']);
     $quoteHtml = $service->invoiceHtml($project, $quote);
     foreach (['COT000123', '45', '#aa2244', '#112233', '00112345678', 'cliente@example.com'] as $expected) if (!str_contains($quoteHtml, $expected)) throw new RuntimeException("Quote field missing: $expected");
-    foreach (['<barcode', 'E320000000005', 'AJIz2R', 'ENTREGADO POR', 'RESUMEN DE PAGO', 'class="logo"'] as $unexpected) if (str_contains($quoteHtml, $unexpected)) throw new RuntimeException("Invoice content in quotation: $unexpected");
+    foreach (['<barcode', 'E320000000005', 'AJIz2R', 'ENTREGADO POR', 'RESUMEN DE PAGO', 'Vencimiento', 'class="logo"'] as $unexpected) if (str_contains($quoteHtml, $unexpected)) throw new RuntimeException("Invoice content in quotation: $unexpected");
     if (preg_match('/\bfactura\b/i', strip_tags($quoteHtml))) throw new RuntimeException('Invoice wording in quotation.');
     if ($service->documentFilename($quote) !== 'Cotizacion_COT000123.pdf') throw new RuntimeException('Wrong quote filename.');
     $quotePdf = $service->invoice($project, 'facturas', $quote);

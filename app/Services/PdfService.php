@@ -193,10 +193,10 @@ final class PdfService
 
         $qrBlock = '';
         if ($verificationUrl !== '') {
-            $qrBlock = '<div class="qr-box" style="width:100%;text-align:center;line-height:1.15">'
-                . '<div style="margin-bottom:2mm;color:#078b8f;font-size:7pt;font-weight:bold;letter-spacing:.5pt">VERIFICAR EN DGII</div>'
-                . '<barcode code="' . $e($verificationUrl) . '" type="QR" size="0.68" error="M" disableborder="1" />'
-                . '<div style="margin-top:1.5mm;color:#66777d;font-size:5.5pt">Escanee para validar el comprobante</div></div>';
+            $qrBlock = '<table class="qr-box" style="width:100%;text-align:center;line-height:1.15">'
+                . '<tr><td style="padding-bottom:2mm;color:#078b8f;font-size:6pt;font-weight:bold;text-align:center">VERIFICAR EN DGII</td></tr>'
+                . '<tr><td style="text-align:center"><barcode code="' . $e($verificationUrl) . '" type="QR" size="0.68" error="M" disableborder="1" /></td></tr>'
+                . '<tr><td style="padding-top:1.5mm;color:#66777d;font-size:5.5pt;text-align:center">Escanee para validar el comprobante</td></tr></table>';
         }
 
         $documentTitle = $e(strtoupper($this->firstValue($invoice['documento_titulo'] ?? '', 'Factura')));

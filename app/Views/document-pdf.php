@@ -28,7 +28,7 @@ table{border-collapse:collapse;width:100%}td{vertical-align:top}.header{border-b
 </td><td><table class="invoice-box"><tr><td class="document-heading" style="background:<?= $heading ?>;color:#fff;padding:11px 13px"><span class="document-type"><?= $documentTitle ?></span><br><span class="document-number"><?= $invoiceNumber ?></span></td></tr><tr><td style="padding:0">
 <table class="meta"><tr><td>Fecha</td><td class="right"><?= $e($issuedAt) ?></td></tr>
 <?php if (!$quote && $ncf !== ''): ?><tr><td>COMPROBANTE FISCAL</td><td class="right"><?= $e($ncf) ?></td></tr><?php endif; ?>
-<?php if ($dueAt !== ''): ?><tr><td>Vencimiento</td><td class="right"><?= $e($dueAt) ?></td></tr><?php endif; ?>
+<?php if (!$quote && $dueAt !== ''): ?><tr><td>Vencimiento</td><td class="right"><?= $e($dueAt) ?></td></tr><?php endif; ?>
 <?php if (!$quote): ?><tr><td>Estado</td><td class="right"><?= $e($status) ?></td></tr><?php endif; ?></table></td></tr></table></td></tr></table>
 <?php if ($quote): ?><div class="validity">Esta cotización tiene una validez de <?= (int) $design['quote_validity_days'] ?> días</div><?php endif; ?>
 <div class="client-box"><div class="section-label">DATOS DEL CLIENTE</div><table><tr><td><table class="client-grid">
