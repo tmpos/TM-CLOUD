@@ -220,6 +220,17 @@ try {
             throw new RuntimeException("Invoice company fallback is missing: $expected");
         }
     }
+    $db = $schema->connection($project);
+    $db->exec("ALTER TABLE empresa ADD COLUMN uid TEXT; ALTER TABLE empresa ADD COLUMN almacen_id INTEGER");
+    $db->exec("UPDATE empresa SET uid='main', almacen_id=1");
+    $db->prepare('INSERT INTO empresa (id,uid,almacen_id,nombre,logo) VALUES (2,?,?,?,?)')->execute(['second',1,'SECOND COMPANY',$logo]);
+    $scopedInvoice = array_replace($invoice, ['almacen_uid'=>'second', 'almacen_id'=>1, 'alanube_stamp_url'=>'']);
+    $scopedHtml = $service->invoiceHtml($project, $scopedInvoice);
+    if (!str_contains($scopedHtml,'SECOND COMPANY') || str_contains($scopedHtml,'TM RESTAURANTE')) throw new RuntimeException('Invoice used the wrong company.');
+    $db->exec("UPDATE empresa SET logo='' WHERE uid='second'");
+    if (str_contains($service->invoiceHtml($project,$scopedInvoice), '<img src="data:image')) throw new RuntimeException('Empty company logo inherited another logo.');
+    $scopedInvoice['almacen_uid']='missing';
+    if (str_contains($service->invoiceHtml($project,$scopedInvoice),$logo)) throw new RuntimeException('Unknown warehouse inherited main logo.');
     echo 'INVOICE_PDF_SMOKE=OK bytes=' . strlen($content) . PHP_EOL;
 } finally {
     \App\Core\Database::disconnect($databasePath);

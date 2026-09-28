@@ -463,6 +463,21 @@ final class ApiController
             $this->sharedDocuments->revoke($p['uid'], $uid);
             Flight::json(['data' => ['revoked' => true]]);
         }));
+        foreach (['create', 'status', 'cancel'] as $operation) {
+            Flight::route('POST /api/license/company-signature/' . $operation, function () use ($operation): void {
+                try {
+                    $input = Http::input();
+                    $project = $this->licensedProject($input, 'license-company-signature-' . $operation);
+                    $service = new \App\Services\CompanySignatureService($this->schema, $this->config);
+                    Flight::json(['data' => ['request' => $operation === 'create' ? $service->create($project, $input) : $service->$operation($project)]]);
+                } catch (\Throwable $e) {
+                    $status = in_array($e->getCode(), [401, 403, 404, 409, 423, 429], true) ? $e->getCode() : 422;
+                    Http::error($e, $status);
+                }
+            });
+        }
+        Flight::route('GET /sign/company/@project/@token', fn ($project, $token) => $this->serveCompanySignaturePage((string) $project, (string) $token, false));
+        Flight::route('POST /sign/company/@project/@token', fn ($project, $token) => $this->serveCompanySignaturePage((string) $project, (string) $token, true));
         Flight::route('GET /sign/invoice/@token', fn ($token) => $this->serveSignaturePage((string) $token, false));
         Flight::route('POST /sign/invoice/@token', fn ($token) => $this->serveSignaturePage((string) $token, true));
         Flight::route('GET /sign/invoice/@token/preview', fn ($token) => $this->serveSignaturePreview((string) $token));
@@ -1024,6 +1039,33 @@ final class ApiController
             throw new \RuntimeException('La factura cambió. Solicite un nuevo enlace de firma.', 409);
         }
         return [$request, $project, $invoice, $storedSnapshot];
+    }
+
+    private function serveCompanySignaturePage(string $projectUid, string $token, bool $submit): void
+    {
+        header('Cache-Control: no-store');
+        header('Referrer-Policy: no-referrer');
+        header('X-Robots-Tag: noindex, nofollow');
+        header('Content-Type: text/html; charset=UTF-8');
+        $request = null; $project = null; $error = '';
+        try {
+            $this->keys->rateLimitPublic('company-signature:' . hash('sha256', $projectUid . ':' . $token), $submit ? 10 : 40);
+            $project = $this->projects->findActive($projectUid);
+            $service = new \App\Services\CompanySignatureService($this->schema, $this->config);
+            $request = $service->resolve($project, $token);
+            if ($submit) {
+                $service->sign($project, $token, Http::input());
+                $request = $service->resolve($project, $token);
+            }
+        } catch (\Throwable $e) {
+            http_response_code(in_array($e->getCode(), [409, 429], true) ? $e->getCode() : ($submit && $request ? 422 : 404));
+            if (!$request || !$project) {
+                echo '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Enlace no disponible</title><main style="max-width:600px;margin:50px auto;padding:20px;font:18px system-ui"><h1>Enlace de firma no disponible</h1><p>Solicita un enlace nuevo a la empresa.</p></main></html>';
+                return;
+            }
+            $error = $e->getMessage();
+        }
+        require dirname(__DIR__) . '/Views/company-sign.php';
     }
 
     private function serveSignaturePage(string $token, bool $submit): void

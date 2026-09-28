@@ -280,7 +280,20 @@ final class PdfService
     private function companyData(array $project, array $invoice): array
     {
         $table = $this->firstIfTable($project, 'empresa');
-        $license = $this->licenses?->companyData((string) ($project['uid'] ?? '')) ?? [];
+        $warehouseUid = trim((string) ($invoice['almacen_uid'] ?? ''));
+        $warehouseId = (int) ($invoice['almacen_id'] ?? 0);
+        $scoped = $warehouseUid !== '' || $warehouseId > 0;
+        if ($scoped) {
+            $table = [];
+            try {
+                $companies = $this->schema->connection($project)->query('SELECT * FROM empresa')->fetchAll();
+                $matches = array_values(array_filter($companies, static fn (array $row): bool => $warehouseUid !== ''
+                    ? (string) ($row['uid'] ?? '') === $warehouseUid || (string) ($row['almacen_uid'] ?? '') === $warehouseUid
+                    : (int) (($row['almacen_id'] ?? 0) ?: ($row['id'] ?? 0)) === $warehouseId));
+                if (count($matches) === 1) $table = $matches[0];
+            } catch (\Throwable) { }
+        }
+        $license = $scoped ? [] : ($this->licenses?->companyData((string) ($project['uid'] ?? '')) ?? []);
         $stampRnc = '';
         $stampUrl = html_entity_decode(trim((string) ($invoice['alanube_stamp_url'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         if ($this->isTrustedDgiiUrl($stampUrl)) {
@@ -294,7 +307,7 @@ final class PdfService
             'telefono' => $this->firstValue($table['telefono'] ?? '', $license['telefono'] ?? '', $invoice['empresa_telefono'] ?? '', $invoice['emisor_telefono'] ?? ''),
             'email' => $this->firstValue($table['email'] ?? '', $license['email'] ?? '', $invoice['empresa_email'] ?? '', $invoice['emisor_email'] ?? ''),
             'direccion' => $this->firstValue($table['direccion'] ?? '', $license['direccion'] ?? '', $invoice['empresa_direccion'] ?? '', $invoice['emisor_direccion'] ?? ''),
-            'logo' => $this->firstValue($table['logoprinter'] ?? '', $table['logo'] ?? '', $license['logo'] ?? '', $invoice['empresa_logo'] ?? '', $invoice['emisor_logo'] ?? ''),
+            'logo' => $table ? $this->firstValue($table['logoprinter'] ?? '', $table['logo'] ?? '') : ($scoped ? '' : $this->firstValue($license['logo'] ?? '', $invoice['empresa_logo'] ?? '', $invoice['emisor_logo'] ?? '')),
             'moneda' => $this->firstValue($table['moneda'] ?? '', $license['moneda'] ?? '', $invoice['moneda'] ?? '', 'RD$'),
         ];
     }
