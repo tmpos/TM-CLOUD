@@ -597,6 +597,7 @@ final class PdfService
             $details[] = [
                 'codigo' => $item['codigo'] ?? $item['codigo_barra'] ?? $item['sku'] ?? '',
                 'nombre' => $name !== '' ? $name : 'Producto',
+                'descripcion' => trim((string) ($item['descripcion'] ?? '')),
                 'cantidad' => $quantity > 0 ? $quantity : 1,
                 'precio_unitario' => $unit,
                 'total' => (float) ($item['total'] ?? $item['importe'] ?? (($quantity > 0 ? $quantity : 1) * $unit)),

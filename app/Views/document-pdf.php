@@ -6,6 +6,7 @@ $tax = (float) ($invoice['impuesto_monto'] ?? $invoice['impuesto'] ?? 0);
 $discount = (float) ($invoice['descuento_monto'] ?? $invoice['descuento'] ?? 0);
 $total = (float) ($invoice['total'] ?? 0);
 $subtotal = (float) ($invoice['subtotal'] ?? ($total + $discount - $tax));
+$companySignature = $design['show_company_signature'] && $design['representative_signature'] !== '';
 $currencyMoney = static fn ($value) => $currency . ' ' . $money($value);
 ?>
 <!doctype html><html lang="es"><head><meta charset="utf-8"><title><?= $documentTitle ?> <?= $invoiceNumber ?></title>
@@ -39,12 +40,15 @@ table{border-collapse:collapse;width:100%}td{vertical-align:top}.header{border-b
 </table></td><?php if (!$quote && $qrBlock !== ''): ?><td class="qr"><?= $qrBlock ?><?php if ($securityCode !== ''): ?><div>Código de seguridad: <?= $e($securityCode) ?></div><?php endif; ?></td><?php endif; ?></tr></table></div>
 <table class="products"><thead><tr><th style="width:12%">CÓD.</th><th>DESCRIPCIÓN</th><th style="width:10%">CANT.</th><th style="width:17%">P.U.</th><th style="width:18%">TOTAL</th></tr></thead><tbody>
 <?php foreach ($details as $item): $quantity = (float) ($item['cantidad'] ?? 1); $unit = (float) ($item['precio_unitario'] ?? $item['precio'] ?? 0); ?>
-<tr><td><?= $e($item['codigo'] ?? '') ?></td><td><strong><?= $e($item['nombre'] ?? $item['descripcion'] ?? 'Producto') ?></strong><?php if (!empty($item['notas'])): ?><div class="item-note"><?= $e($item['notas']) ?></div><?php endif; ?></td><td class="center"><?= $money($quantity) ?></td><td class="num"><?= $currencyMoney($unit) ?></td><td class="num"><?= $currencyMoney($item['total'] ?? ($quantity * $unit)) ?></td></tr>
+<tr><td><?= $e($item['codigo'] ?? '') ?></td><td><strong><?= $e($item['nombre'] ?? $item['descripcion'] ?? 'Producto') ?></strong><?php if (!empty($item['descripcion']) && trim((string) $item['descripcion']) !== trim((string) ($item['nombre'] ?? ''))): ?><div style="margin-top:4px;font-size:10px;line-height:1.45;color:#52667a"><?= nl2br($e($item['descripcion'])) ?></div><?php endif; ?><?php if (!empty($item['notas'])): ?><div class="item-note"><?= $e($item['notas']) ?></div><?php endif; ?></td><td class="center"><?= $money($quantity) ?></td><td class="num"><?= $currencyMoney($unit) ?></td><td class="num"><?= $currencyMoney($item['total'] ?? ($quantity * $unit)) ?></td></tr>
 <?php endforeach; ?>
 <?php if (!$details): ?><tr><td colspan="5" class="empty">Detalle de productos no disponible</td></tr><?php endif; ?>
 </tbody></table>
 <?php if ($notes !== '' || !$quote): ?><div class="note"><strong>OBSERVACIÓN:</strong><br><?= $notes !== '' ? nl2br($e($notes)) : '¡Gracias por su compra!' ?></div><?php endif; ?>
-<table class="bottom"><tr><td class="signatures"><?php if (!$quote): ?><table><tr><td><div class="signature-line"><strong>ENTREGADO POR</strong><br><?= $e($invoice['usuario'] ?? $invoice['cajero'] ?? '') ?></div></td><td><?= $signatureHtml ?></td></tr></table><?php endif; ?></td><td class="totals-panel"><table class="totals"><tr><td colspan="2" class="totals-title" style="text-align:left;background:#eaf4f9;color:<?= $primary ?>;padding:8px 10px"><?= $quote ? 'RESUMEN DE COTIZACIÓN' : 'RESUMEN DE PAGO' ?></td></tr>
+<table class="bottom"><tr><td class="signatures"><?php if ($companySignature || !$quote): ?><table><tr><td style="text-align:center;width:50%">
+<?php if ($companySignature): ?><img src="<?= $e($design['representative_signature']) ?>" alt="Firma del representante" style="max-width:150px;max-height:54px"><div class="signature-line" style="margin-top:4px"><strong><?= $e($design['representative_name']) ?></strong><br>Representante de la empresa</div>
+<?php else: ?><div class="signature-line"><strong>ENTREGADO POR</strong><br><?= $e($invoice['usuario'] ?? $invoice['cajero'] ?? '') ?></div><?php endif; ?>
+</td><?php if (!$quote): ?><td><?= $signatureHtml ?></td><?php endif; ?></tr></table><?php endif; ?></td><td class="totals-panel"><table class="totals"><tr><td colspan="2" class="totals-title" style="text-align:left;background:#eaf4f9;color:<?= $primary ?>;padding:8px 10px"><?= $quote ? 'RESUMEN DE COTIZACIÓN' : 'RESUMEN DE PAGO' ?></td></tr>
 <tr><td>SUBTOTAL</td><td><?= $currencyMoney($subtotal) ?></td></tr>
 <?php if ($tax > 0): ?><tr><td>ITBIS</td><td><?= $currencyMoney($tax) ?></td></tr><?php endif; ?>
 <?php if ($discount > 0): ?><tr><td>DESCUENTO</td><td><?= $currencyMoney($discount) ?></td></tr><?php endif; ?>

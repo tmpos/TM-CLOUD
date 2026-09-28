@@ -160,6 +160,31 @@ try {
     $quotePdf = $service->invoice($project, 'facturas', $quote);
     if (!str_starts_with($quotePdf, '%PDF-')) throw new RuntimeException('Invalid quote PDF.');
     if (getenv('INVOICE_PDF_PREVIEW')) file_put_contents(getenv('INVOICE_PDF_PREVIEW') . '.quote.pdf', $quotePdf);
+    $signatureImage = imagecreatetruecolor(260, 80);
+    $white = imagecolorallocate($signatureImage, 255, 255, 255);
+    $ink = imagecolorallocate($signatureImage, 16, 42, 67);
+    imagefill($signatureImage, 0, 0, $white);
+    imagestring($signatureImage, 5, 50, 30, 'FIRMA DE PRUEBA', $ink);
+    ob_start(); imagepng($signatureImage); $signaturePng = 'data:image/png;base64,' . base64_encode(ob_get_clean());
+    imagedestroy($signatureImage);
+    $signedDesign = $designs->save($project, ['show_company_signature' => true, 'representative_name' => 'Representante & Empresa', 'representative_signature' => $signaturePng]);
+    foreach (['FACTURA_VENTA', 'COTIZACION'] as $type) {
+        $signedInvoice = array_merge($inlineInvoice, ['tipo_factura' => $type, 'productos' => json_encode([['nombre' => 'Mantenimiento', 'descripcion' => "Limpieza completa\nRevisar <equipo>", 'cantidad' => 1, 'precio' => 100]])]);
+        $signedHtml = $service->invoiceHtml($project, $signedInvoice);
+        foreach (['Limpieza completa', 'Revisar &lt;equipo&gt;', 'alt="Firma del representante"', 'Representante &amp; Empresa'] as $expected) if (!str_contains($signedHtml, $expected)) throw new RuntimeException("Signature/description missing: $expected");
+        $signedPdf = $service->invoice($project, 'facturas', $signedInvoice);
+        if (!str_starts_with($signedPdf, '%PDF-')) throw new RuntimeException('Invalid signed PDF.');
+        if (getenv('INVOICE_PDF_PREVIEW')) file_put_contents(getenv('INVOICE_PDF_PREVIEW') . '.' . $type . '.signed.pdf', $signedPdf);
+    }
+    // Old clients saving only colors must not erase the representative signature.
+    $designs->save($project, ['primary_color' => '#123456']);
+    if (!$designs->get($project)['show_company_signature']) throw new RuntimeException('Old client erased signature settings.');
+    $designs->save($project, ['show_company_signature' => false]);
+    if ($designs->get($project)['representative_signature'] !== $signaturePng) throw new RuntimeException('Disabling erased the saved signature.');
+    if (str_contains($service->invoiceHtml($project, $signedInvoice), 'alt="Firma del representante"')) throw new RuntimeException('Disabled signature was rendered.');
+    foreach (['data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,bm90LWEtcG5n', 'https://example.test/signature.png'] as $invalidSignature) {
+        try { $designs->save($project, ['representative_signature' => $invalidSignature]); throw new LogicException('Invalid signature accepted.'); } catch (InvalidArgumentException) {}
+    }
     $designs->save($project, $designs::defaults());
 
     $inlineContent = $service->invoice($project, 'facturas', $inlineInvoice);
