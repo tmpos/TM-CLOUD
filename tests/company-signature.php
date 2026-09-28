@@ -36,5 +36,13 @@ foreach (['create'=>'documentos:crearEnlaceFirmaRepresentante','status'=>'docume
     check($runtime->isWrite('invoke',$payload) === ($operation !== 'status'),'Write authorization classification');
     rejected(fn()=>$runtime->handle($p,'invoke',$payload,['rol'=>'Vendedor']));
     check($runtime->handle($p,'invoke',$payload,['rol'=>'Administrador'])['success'],'Admin access');
+    foreach ([['rol'=>'CEO'], ['rol'=>'usuario','nivel_seguridad'=>' CEO '], ['rol'=>'ADMIN'], ['nivel_seguridad'=>'Administrador'], ['rol'=>'Soporte']] as $actor) {
+        check($runtime->handle($p,'invoke',$payload,$actor)['success'],'Recognized administrative role');
+    }
+    foreach ([[], ['rol'=>'CEO','nivel_seguridad'=>'Usuario'], ['rol'=>'Administrador','nivel_seguridad'=>'Cajero'], ['rol'=>'Gerente']] as $actor) {
+        $spoofed = array_replace($payload,['args'=>[['usuario'=>'admin','rol'=>'Administrador','nivel_seguridad'=>'CEO']]]);
+        rejected(fn()=>$runtime->handle($p,'invoke',$spoofed,$actor));
+    }
+
 }
 echo "COMPANY_SIGNATURE=OK isolation, consent, validation, replacement, cancellation, expiry, single use\n";

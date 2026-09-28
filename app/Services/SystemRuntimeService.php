@@ -242,27 +242,36 @@ final class SystemRuntimeService
         return $active && in_array('soporte', $roles, true);
     }
 
+    /** Match the frontend's effectiveUserRole, using only the authenticated actor. */
+    private function canConfigureDocuments(array $actor): bool
+    {
+        $roles = ['administrador'=>'administrador', 'admin'=>'administrador', 'ceo'=>'administrador',
+            'usuario'=>'vendedor', 'vendedor'=>'vendedor', 'cajero'=>'cajero',
+            'soporte'=>'soporte', 'taller'=>'taller', 'gerente'=>'gerente'];
+        $level = strtolower(trim((string) ($actor['nivel_seguridad'] ?? '')));
+        $role = strtolower(trim((string) ($actor['rol'] ?? '')));
+        $effective = $roles[$level] ?? $roles[$role] ?? $role;
+        return in_array($effective, ['administrador', 'soporte'], true);
+    }
+
     private function invoke(PDO $db, array $project, string $channel, array $args, array $actor): mixed
     {
         if (in_array($channel, ['clientes:obtenerFormulario', 'clientes:guardarFormulario'], true)) {
             if ($channel === 'clientes:guardarFormulario' && $actor) {
-                $roles = array_map(fn ($value) => strtolower(trim((string) $value)), [$actor['rol'] ?? '', $actor['nivel_seguridad'] ?? '']);
-                if (!array_intersect($roles, ['administrador', 'admin', 'soporte'])) throw new RuntimeException('Solo Administrador o Soporte puede configurar el formulario.', 403);
+                if (!$this->canConfigureDocuments($actor)) throw new RuntimeException('Solo Administrador o Soporte puede configurar el formulario.', 403);
             }
             return ['success' => true, 'data' => $this->customerRegistrations->settings($project, $channel === 'clientes:guardarFormulario' ? (array) ($args[0] ?? []) : null)];
         }
         $signatureOperations = ['documentos:crearEnlaceFirmaRepresentante' => 'create', 'documentos:estadoFirmaRepresentante' => 'status', 'documentos:cancelarFirmaRepresentante' => 'cancel'];
         if (isset($signatureOperations[$channel])) {
-            $roles = array_map(fn ($value) => strtolower(trim((string) $value)), [$actor['rol'] ?? '', $actor['nivel_seguridad'] ?? '']);
-            if (!array_intersect($roles, ['administrador', 'admin', 'soporte'])) throw new RuntimeException('Solo Administrador o Soporte puede solicitar o consultar la firma del representante.', 403);
+            if (!$this->canConfigureDocuments($actor)) throw new RuntimeException('Solo Administrador o Soporte puede solicitar o consultar la firma del representante.', 403);
             if (!$this->companySignatures) throw new RuntimeException('Captura de firma del representante no disponible.');
             $operation = $signatureOperations[$channel];
             return ['success' => true, 'data' => ['request' => $operation === 'create' ? $this->companySignatures->create($project, (array) ($args[0] ?? [])) : $this->companySignatures->$operation($project)]];
         }
         if (in_array($channel, ['documentos:obtenerDiseno', 'documentos:guardarDiseno'], true)) {
             if ($channel === 'documentos:guardarDiseno' && $actor) {
-                $roles = array_map(fn ($value) => strtolower(trim((string) $value)), [$actor['rol'] ?? '', $actor['nivel_seguridad'] ?? '']);
-                if (!array_intersect($roles, ['administrador', 'admin', 'soporte'])) throw new RuntimeException('Solo Administrador o Soporte puede configurar los documentos.', 403);
+                if (!$this->canConfigureDocuments($actor)) throw new RuntimeException('Solo Administrador o Soporte puede configurar los documentos.', 403);
             }
             return ['success' => true, 'data' => ['settings' => $channel === 'documentos:guardarDiseno' ? (new DocumentSettingsService($this->schema))->save($project, (array) ($args[0] ?? [])) : (new DocumentSettingsService($this->schema))->get($project)]];
         }
