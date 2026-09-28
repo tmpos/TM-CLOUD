@@ -63,6 +63,16 @@ $invoice = [
 ];
 
 try {
+    $datedInvoice = array_replace($invoice, ['fecha_emision' => '2026-09-28', 'hora' => '09:15']);
+    if (!str_contains($service->invoiceHtml($project, $datedInvoice), '28/09/2026 09:15 AM')) throw new RuntimeException('Separate POS time was lost.');
+    $datedInvoice['fecha_emision'] = '2026-09-29T02:15:00Z';
+    if (!str_contains($service->invoiceHtml($project, $datedInvoice), '28/09/2026 10:15 PM')) throw new RuntimeException('UTC time did not convert to business timezone.');
+    $db = $schema->connection($project);
+    $db->exec("CREATE TABLE configuracion (clave TEXT, valor TEXT)");
+    $db->exec("INSERT INTO configuracion VALUES ('sistema_zona_horaria', 'America/New_York')");
+    $datedInvoice['fecha_emision'] = '2026-01-01T15:00:00Z';
+    if (!str_contains($service->invoiceHtml($project, $datedInvoice), '01/01/2026 10:00 AM')) throw new RuntimeException('Configured timezone was ignored.');
+    $db->exec("DELETE FROM configuracion");
     $html = $service->invoiceHtml($project, $invoice);
     foreach (['TM RESTAURANTE', '000005', 'E320000000005', 'AJIz2R', 'RncEmisor=133130343', 'MontoTotal=4487.78', 'CodigoSeguridad=AJIz2R', '<barcode'] as $expected) {
         if (!str_contains($html, $expected)) {

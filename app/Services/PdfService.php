@@ -128,7 +128,7 @@ final class PdfService
             . '<div class="meta">' . implode('<br>', array_map($e, $contact)) . '</div></div><div class="rule"></div>'
             . '<div class="center document-title">COMPROBANTE DE VENTA</div><table class="info">'
             . '<tr><td class="label">Recibo</td><td class="value">' . $number . '</td></tr>'
-            . '<tr><td class="label">Fecha</td><td class="value">' . $e($this->formatDate((string) ($record['fecha_emision'] ?? $record['created_at'] ?? ''))) . '</td></tr>'
+            . '<tr><td class="label">Fecha</td><td class="value">' . $e($this->issuedDate($project, $record)) . '</td></tr>'
             . '<tr><td class="label">Cliente</td><td class="value">' . $customer . '</td></tr>'
             . '<tr><td class="label">Estado</td><td class="value">' . $e($record['estado_factura'] ?? $record['estado'] ?? '') . '</td></tr></table><div class="rule"></div>'
             . '<table class="items"><thead><tr><th class="qty">Cant.</th><th>Descripción</th><th class="right amount">Importe</th></tr></thead><tbody>' . $rows . '</tbody></table>'
@@ -175,7 +175,7 @@ final class PdfService
         $logo = $this->companyLogoDataUri($project, (string) ($company['logo'] ?? ''));
 
         $status = strtoupper(trim((string) ($invoice['estado_factura'] ?? $invoice['estado'] ?? 'PAGADA')));
-        $issuedAt = $this->formatDate((string) ($invoice['fecha_emision'] ?? $invoice['created_at'] ?? ''));
+        $issuedAt = $this->issuedDate($project, $invoice);
         $dueAt = $this->formatDate((string) ($invoice['fecha_vencimiento'] ?? $invoice['vence_at'] ?? ''));
         $clientName = $e($this->firstValue($invoice['nombre_cliente'] ?? '', $invoice['customer_name'] ?? '', $client['nombre'] ?? '', 'Consumidor final'));
         $clientTaxId = $e($this->firstValue($invoice['rnc_cliente'] ?? '', $invoice['cedula_cliente'] ?? '', $invoice['cedula_rnc'] ?? '', $invoice['customer_document'] ?? '', $client['rnc'] ?? '', $client['cedula'] ?? '', $client['cedula_rnc'] ?? ''));
@@ -415,6 +415,33 @@ final class PdfService
             $letters .= mb_strtoupper(mb_substr($word, 0, 1));
         }
         return $letters !== '' ? $letters : 'TM';
+    }
+
+    private function issuedDate(array $project, array $record): string
+    {
+        $zone = new \DateTimeZone('America/Santo_Domingo');
+        try {
+            $stmt = $this->schema->connection($project)->prepare("SELECT valor FROM configuracion WHERE clave = 'sistema_zona_horaria' LIMIT 1");
+            $stmt->execute();
+            $configured = trim((string) $stmt->fetchColumn());
+            if ($configured !== '') $zone = new \DateTimeZone($configured);
+        } catch (\Throwable) {
+            // Older projects may not have regional settings yet.
+        }
+        $value = trim((string) ($record['fecha_emision'] ?? $record['created_at'] ?? ''));
+        if ($value === '') return '';
+        $time = trim((string) ($record['hora'] ?? ''));
+        // POS stores business date and time separately, without a UTC offset.
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+            if (preg_match('/^\d{1,2}:\d{2}(?::\d{2})?$/', $time)) $value .= ' ' . $time;
+            else return (new \DateTimeImmutable($value, $zone))->format('d/m/Y');
+        }
+        try {
+            // Only explicit offsets/Z are converted; naive stored dates are business time.
+            return (new \DateTimeImmutable($value, $zone))->setTimezone($zone)->format('d/m/Y h:i A');
+        } catch (\Throwable) {
+            return $value;
+        }
     }
 
     private function formatDate(string $value): string
