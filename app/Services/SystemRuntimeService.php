@@ -243,7 +243,7 @@ final class SystemRuntimeService
     }
 
     /** Match the frontend's effectiveUserRole, using only the authenticated actor. */
-    private function canConfigureDocuments(array $actor): bool
+    private function canConfigureSystem(array $actor): bool
     {
         $roles = ['administrador'=>'administrador', 'admin'=>'administrador', 'ceo'=>'administrador',
             'usuario'=>'vendedor', 'vendedor'=>'vendedor', 'cajero'=>'cajero',
@@ -254,24 +254,66 @@ final class SystemRuntimeService
         return in_array($effective, ['administrador', 'soporte'], true);
     }
 
+    private function assignAllWarehouse(PDO $db, array $input, array $actor): array
+    {
+        if (!$this->canConfigureSystem($actor)) throw new RuntimeException('Solo Administrador o Soporte puede asignar los datos al almacén.', 403);
+        $id = filter_var($input['almacen_id'] ?? null, FILTER_VALIDATE_INT);
+        $uid = is_string($input['almacen_uid'] ?? null) ? trim($input['almacen_uid']) : '';
+        if (!$id || $id < 1 || $uid === '') throw new InvalidArgumentException('El almacén actual no tiene ID o UID válido.');
+        $excluded = ['empresa', 'usuarios', 'bancos', 'banco_transacciones', 'schema_migrations', 'configuracion', 'licencia', 'tmcloud_config', 'otp_local_config', 'sync_deletes', 'bitacora', 'auditoria_acciones'];
+        $db->beginTransaction();
+        try {
+            $company = $db->prepare('SELECT * FROM empresa WHERE id=?');
+            $company->execute([$id]);
+            $row = $company->fetch();
+            if (!$row || ($uid !== (string) ($row['uid'] ?? '') && $uid !== (string) ($row['almacen_uid'] ?? ''))) {
+                throw new InvalidArgumentException('El almacén actual no coincide con una empresa registrada.');
+            }
+            $summary = [];
+            $now = $this->now();
+            $tables = $db->query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($tables as $name) {
+                if (str_starts_with($name, '_') || str_starts_with($name, 'sqlite_') || in_array($name, $excluded, true)) continue;
+                $columns = $this->columns($db, $name);
+                if (!in_array('almacen_uid', $columns, true)) continue;
+                $sets = ['almacen_uid=?']; $values = [$uid];
+                if (in_array('almacen_id', $columns, true)) { $sets[] = 'almacen_id=?'; $values[] = $id; }
+                if (in_array('updated_at', $columns, true)) { $sets[] = 'updated_at=?'; $values[] = $now; }
+                $stmt = $db->prepare('UPDATE ' . Support::quoteIdentifier($name) . ' SET ' . implode(',', $sets));
+                $stmt->execute($values);
+                if ($stmt->rowCount() > 0) $summary[$name] = $stmt->rowCount();
+            }
+            $result = ['registros' => array_sum($summary), 'tablas' => count($summary), 'resumen' => $summary];
+            $this->audit($db, 'empresa', $id, 'ASSIGN_ALL_WAREHOUSE', $actor, ['almacen_uid'=>$uid] + $result, null);
+            $db->commit();
+            return ['success'=>true, 'data'=>$result];
+        } catch (\Throwable $error) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $error;
+        }
+    }
+
     private function invoke(PDO $db, array $project, string $channel, array $args, array $actor): mixed
     {
+        if ($channel === 'almacen:asignarTodosLosDatos') {
+            return $this->assignAllWarehouse($db, (array) ($args[0] ?? []), $actor);
+        }
         if (in_array($channel, ['clientes:obtenerFormulario', 'clientes:guardarFormulario'], true)) {
             if ($channel === 'clientes:guardarFormulario' && $actor) {
-                if (!$this->canConfigureDocuments($actor)) throw new RuntimeException('Solo Administrador o Soporte puede configurar el formulario.', 403);
+                if (!$this->canConfigureSystem($actor)) throw new RuntimeException('Solo Administrador o Soporte puede configurar el formulario.', 403);
             }
             return ['success' => true, 'data' => $this->customerRegistrations->settings($project, $channel === 'clientes:guardarFormulario' ? (array) ($args[0] ?? []) : null)];
         }
         $signatureOperations = ['documentos:crearEnlaceFirmaRepresentante' => 'create', 'documentos:estadoFirmaRepresentante' => 'status', 'documentos:cancelarFirmaRepresentante' => 'cancel'];
         if (isset($signatureOperations[$channel])) {
-            if (!$this->canConfigureDocuments($actor)) throw new RuntimeException('Solo Administrador o Soporte puede solicitar o consultar la firma del representante.', 403);
+            if (!$this->canConfigureSystem($actor)) throw new RuntimeException('Solo Administrador o Soporte puede solicitar o consultar la firma del representante.', 403);
             if (!$this->companySignatures) throw new RuntimeException('Captura de firma del representante no disponible.');
             $operation = $signatureOperations[$channel];
             return ['success' => true, 'data' => ['request' => $operation === 'create' ? $this->companySignatures->create($project, (array) ($args[0] ?? [])) : $this->companySignatures->$operation($project)]];
         }
         if (in_array($channel, ['documentos:obtenerDiseno', 'documentos:guardarDiseno'], true)) {
             if ($channel === 'documentos:guardarDiseno' && $actor) {
-                if (!$this->canConfigureDocuments($actor)) throw new RuntimeException('Solo Administrador o Soporte puede configurar los documentos.', 403);
+                if (!$this->canConfigureSystem($actor)) throw new RuntimeException('Solo Administrador o Soporte puede configurar los documentos.', 403);
             }
             return ['success' => true, 'data' => ['settings' => $channel === 'documentos:guardarDiseno' ? (new DocumentSettingsService($this->schema))->save($project, (array) ($args[0] ?? [])) : (new DocumentSettingsService($this->schema))->get($project)]];
         }
