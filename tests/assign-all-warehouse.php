@@ -21,11 +21,13 @@ $projectDb->exec("CREATE TABLE clientes(id INTEGER PRIMARY KEY,almacen_uid TEXT)
 foreach (['usuarios','bancos','banco_transacciones','_internal'] as $name) $projectDb->exec("CREATE TABLE $name(id INTEGER PRIMARY KEY,almacen_uid TEXT); INSERT INTO $name VALUES(1,'first')");
 $payload=['channel'=>'almacen:asignarTodosLosDatos','args'=>[['almacen_id'=>2,'almacen_uid'=>'second']]];
 check($runtime->isWrite('invoke',$payload),'Must classify as write');
-foreach ([[],['rol'=>'Vendedor'],['rol'=>'CEO','nivel_seguridad'=>'Usuario']] as $actor) rejected(fn()=>$runtime->handle($p,'invoke',$payload,$actor));
+foreach ([[],['email'=>'api-key'],['rol'=>'Vendedor'],['rol'=>'CEO','nivel_seguridad'=>'Usuario']] as $actor) rejected(fn()=>$runtime->handle($p,'invoke',$payload,$actor));
 $bad=$payload; $bad['args'][0]['almacen_uid']='foreign'; rejected(fn()=>$runtime->handle($p,'invoke',$bad,['rol'=>'CEO']));
 check($projectDb->query('SELECT almacen_uid FROM productos WHERE id=1')->fetchColumn()==='first','Rejected operations changed rows');
 $otherDb=$schema->connection($other); $otherDb->exec("CREATE TABLE productos(almacen_uid TEXT); INSERT INTO productos VALUES('foreign')");
-$result=$runtime->handle($p,'invoke',$payload,['nivel_seguridad'=>'CEO']);
+$spoofed=$payload;$spoofed['args'][0]['authentication']='project-secret';
+rejected(fn()=>$runtime->handle($p,'invoke',$spoofed,['rol'=>'Vendedor']));
+$result=$runtime->handle($p,'invoke',$payload,['email'=>'api-key','authentication'=>'project-secret']);
 check($result['data']['registros']===3 && $result['data']['tablas']===2,'Summary counts');
 check((int)$projectDb->query("SELECT COUNT(*) FROM productos WHERE almacen_uid='second' AND almacen_id=2 AND updated_at<>'old'")->fetchColumn()===2,'Assignment and sync timestamp');
 check($projectDb->query('SELECT almacen_uid FROM clientes')->fetchColumn()==='second','UID-only table');

@@ -547,7 +547,9 @@ final class ApiController
             $input = Http::input();
             $action = trim((string) ($input['action'] ?? ''));
             $payload = is_array($input['data'] ?? null) ? $input['data'] : [];
-            Flight::json($this->runtime->handle($p, $action, $payload, ['email' => 'api-key']));
+            // runProject(..., true) already authenticated the project's Secret key.
+            // This authority is server-owned, never taken from the request payload.
+            Flight::json($this->runtime->handle($p, $action, $payload, ['email' => 'api-key', 'authentication' => 'project-secret']));
         }));
         Flight::route('POST /api/@project/sql', fn ($project) => $this->runProject($project, true, function ($p): void {
             Flight::json([
