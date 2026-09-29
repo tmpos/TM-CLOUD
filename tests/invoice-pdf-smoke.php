@@ -187,6 +187,22 @@ try {
     }
     $designs->save($project, $designs::defaults());
 
+
+    foreach ([$invoice, array_replace($invoice, ['tipo_factura'=>'COTIZACION'])] as $visibilityInvoice) {
+        $designs->save($project, ['visibility'=>['quantity'=>false, 'price'=>false, 'line_total'=>false, 'customer_email'=>false, 'total'=>false]]);
+        $hidden = $service->invoiceHtml($project, $visibilityInvoice);
+        foreach (['CANT.', 'P.U.', 'cliente@example.com', '<tr class="grand">'] as $unexpected) {
+            if (str_contains($hidden, $unexpected)) throw new RuntimeException('Hidden field leaked: '.$unexpected);
+        }
+        if (!str_contains($hidden, 'Cena especial') || !str_contains($hidden, 'SUBTOTAL')) throw new RuntimeException('Unrelated field hidden');
+        $designs->save($project, ['visibility'=>array_fill_keys(array_keys($designs::defaults()['visibility']), false)]);
+        $hidden = $service->invoiceHtml($project, $visibilityInvoice);
+        if (str_contains($hidden, '<table class="products">')) throw new RuntimeException('Empty product table rendered');
+        $minimalPdf = $service->invoice($project, 'facturas', $visibilityInvoice);
+        if (!str_starts_with($minimalPdf, '%PDF-')) throw new RuntimeException('All-hidden PDF failed');
+        $designs->save($project, $designs::defaults());
+    }
+
     $inlineContent = $service->invoice($project, 'facturas', $inlineInvoice);
     if (!str_starts_with($inlineContent, '%PDF-') || strlen($inlineContent) < 10000) {
         throw new RuntimeException('The invoice PDF with inline products is invalid.');

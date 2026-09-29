@@ -26,3 +26,10 @@ foreach ([['heading_color'=>'url(evil)'],['show_logo'=>'false'],['logo_width'=>0
 }
 verify($settings->get($project)['primary_color'] === '#aa2244','Rejected changes must preserve design');
 echo "DOCUMENT_SETTINGS=OK permissions, persistence, validation, tenant isolation\n";
+
+verify(count(array_filter($settings::defaults()['visibility'])) === count($settings::defaults()['visibility']), 'Legacy fields visible');
+$settings->save($project, ['visibility'=>['quantity'=>false, 'total'=>false]]);
+$settings->save($project, ['visibility'=>['price'=>false]]);
+verify($settings->get($project)['visibility']['quantity'] === false, 'Partial save preserves previous visibility');
+verify($settings->get($project)['visibility']['price'] === false, 'Visibility saved');
+try { $settings->save($project, ['visibility'=>['price'=>'false']]); throw new LogicException('Invalid boolean saved'); } catch (InvalidArgumentException) {}

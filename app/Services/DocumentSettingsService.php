@@ -7,11 +7,19 @@ final class DocumentSettingsService
     public function __construct(private SchemaService $schema) {}
     public static function defaults(): array
     {
-        return ['version' => 1, 'primary_color' => '#176b9c', 'heading_color' => '#102a43', 'show_logo' => true, 'logo_width' => 150, 'logo_height' => 90, 'quote_validity_days' => 30, 'show_company_signature' => false, 'representative_name' => '', 'representative_signature' => ''];
+        return ['visibility' => array_fill_keys(['company_name', 'company_tax_id', 'company_phone', 'company_email', 'company_address', 'document_title', 'document_number', 'date', 'fiscal', 'due_date', 'status', 'validity', 'customer_name', 'customer_phone', 'customer_tax_id', 'customer_email', 'customer_address', 'code', 'item_name', 'description', 'identifiers', 'quantity', 'price', 'line_tax', 'line_discount', 'line_total', 'subtotal', 'tax', 'discount', 'total', 'payment', 'shipping', 'tip', 'notes', 'qr', 'delivered_by', 'customer_signature', 'footer'], true), 'version' => 1, 'primary_color' => '#176b9c', 'heading_color' => '#102a43', 'show_logo' => true, 'logo_width' => 150, 'logo_height' => 90, 'quote_validity_days' => 30, 'show_company_signature' => false, 'representative_name' => '', 'representative_signature' => ''];
     }
     public function normalize(array $input): array
     {
         $result = self::defaults();
+        if (array_key_exists('visibility', $input)) {
+            if (!is_array($input['visibility'])) throw new \InvalidArgumentException('Opciones de campos no validas.');
+            foreach ($result['visibility'] as $key => $_) {
+                if (!array_key_exists($key, $input['visibility'])) continue;
+                if (!is_bool($input['visibility'][$key])) throw new \InvalidArgumentException('Visibilidad de campo no valida.');
+                $result['visibility'][$key] = $input['visibility'][$key];
+            }
+        }
         foreach (['primary_color', 'heading_color'] as $key) {
             if (!array_key_exists($key, $input)) continue;
             if (!is_string($input[$key]) || !preg_match('/^#[0-9a-f]{6}$/iD', $input[$key])) throw new \InvalidArgumentException('Color no valido.');
@@ -55,7 +63,7 @@ final class DocumentSettingsService
     }
     public function save(array $project, array $input): array
     {
-        $settings = $this->normalize(array_replace($this->get($project), $input));
+        $settings = $this->normalize(array_replace_recursive($this->get($project), $input));
         $db = $this->schema->connection($project);
         $db->exec('CREATE TABLE IF NOT EXISTS _document_settings (id INTEGER PRIMARY KEY CHECK(id=1), settings TEXT NOT NULL)');
         $db->prepare('INSERT INTO _document_settings VALUES(1,?) ON CONFLICT(id) DO UPDATE SET settings=excluded.settings')->execute([json_encode($settings, JSON_THROW_ON_ERROR)]);
