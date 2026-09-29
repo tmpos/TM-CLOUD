@@ -24,6 +24,10 @@ $input=['signer_name'=>'Ana Torres','signature'=>'data:image/png;base64,'.base64
 rejected(fn()=>$s->sign($p,$token,array_merge($input,['consent'=>false])));
 rejected(fn()=>$s->sign($p,$token,array_merge($input,['signature'=>'invalid'])));
 $s->sign($p,$token,$input); check($s->status($p)['status']==='signed','Signed state');
+$request=$s->resolve($p,$token); $project=$p; $error='';
+ob_start(); require dirname(__DIR__).'/app/Views/company-sign.php'; $receipt=ob_get_clean();
+check(str_contains($receipt,'Firma guardada correctamente en el servidor.'),'Receipt confirmation');
+check(str_contains($receipt,'alt="Firma guardada"') && str_contains($receipt,$input['signature']),'Receipt image preview');
 rejected(fn()=>$s->sign($p,$token,$input));
 check(!(new DocumentSettingsService($schema))->get($p)['show_company_signature'],'Capture must not enable signature');
 check($s->status($other)['status']==='none','Tenant isolation');

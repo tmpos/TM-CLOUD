@@ -25,7 +25,10 @@ $signed = $request['signed_at'] !== null;
 <p class="muted">Empresa: <?= $escape($project['name'] ?? '') ?></p>
 <p class="muted">Enlace válido hasta <?= $escape($request['expires_at']) ?> UTC</p>
 <?php if ($signed): ?>
-<div class="notice">La firma fue recibida el <?= $escape($request['signed_at']) ?>. Este enlace ya no permite firmar otra vez.</div>
+<div class="notice" role="status"><strong>Firma guardada correctamente en el servidor.</strong><br>Recibida el <?= $escape($request['signed_at']) ?> UTC. Ya puedes cerrar esta página.</div>
+<img src="<?= $escape($request['signature']) ?>" alt="Firma guardada" style="display:block;width:100%;max-height:200px;object-fit:contain;border:1px solid #c7d9dc;border-radius:10px;background:white">
+<p>En Configuración → Facturas y cotizaciones PDF aparecerá como <strong>Firma recibida</strong>. Para incluirla en los documentos, pulsa <strong>Usar firma recibida</strong>, activa el interruptor y pulsa <strong>Guardar diseño</strong>.</p>
+<p class="muted">Este enlace ya no permite firmar otra vez.</p>
 <?php else: ?>
 <?php if ($error !== ''): ?><div class="notice error" role="alert"><?= $escape($error) ?></div><?php endif; ?>
 <p>Esta firma se enviará a la empresa para que pueda incluirla en sus facturas y cotizaciones.</p>
