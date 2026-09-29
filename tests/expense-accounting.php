@@ -2,6 +2,7 @@
 require dirname(__DIR__) . '/app/Services/ExpenseAccountingService.php';
 $db=new PDO('sqlite::memory:');$db->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);
 $db->exec(<<<'SQL'
+CREATE TABLE catalogo_cuentas(id INTEGER PRIMARY KEY,uid TEXT NOT NULL UNIQUE,codigo TEXT UNIQUE,nombre TEXT,tipo TEXT,naturaleza TEXT,estado TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
 CREATE TABLE gastos(id INTEGER PRIMARY KEY,uid TEXT,cantidad REAL,fecha TEXT,hora TEXT,comentario TEXT,metodo_pago TEXT,efectivo REAL DEFAULT 0,transferencia REAL DEFAULT 0,banco_id INTEGER,almacen_id INTEGER,almacen_uid TEXT,created_at TEXT,updated_at TEXT);
  CREATE TABLE cuentas_pagar(id INTEGER PRIMARY KEY,uid TEXT,total REAL,abonado REAL,saldo REAL,estado TEXT,pagos TEXT,fecha_compra TEXT,fecha_vencimiento TEXT,nombre_proveedor TEXT,no_factura TEXT,created_at TEXT,updated_at TEXT);
  CREATE TABLE proveedores(id INTEGER PRIMARY KEY,uid TEXT,nombre TEXT,rnc TEXT); INSERT INTO proveedores VALUES(1,'provider','Proveedor','101000001');
