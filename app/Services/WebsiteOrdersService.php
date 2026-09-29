@@ -9,7 +9,7 @@ use RuntimeException;
 /** Read-only access to web checkout orders; project identity is supplied by authentication. */
 final class WebsiteOrdersService
 {
-    public function __construct(private PDO $db) {}
+    public function __construct(private PDO $db, private ?SchemaService $schema = null) {}
 
     public function handle(array $project, string $operation, array $input = []): array
     {
@@ -22,9 +22,28 @@ final class WebsiteOrdersService
             if (!$order) throw new RuntimeException('Pedido no encontrado.', 404);
             // Provider payloads may contain private gateway data and are not part of this screen.
             unset($order['provider_payload'], $order['admin_user_uid']);
-            $stmt = $this->db->prepare('SELECT uid,product_uid,product_name,product_sku,unit_price,quantity,line_total FROM storefront_order_items WHERE order_uid=? ORDER BY id');
+            $stmt = $this->db->prepare('SELECT uid,product_uid,product_name,product_sku,unit_price,quantity,line_total,metadata FROM storefront_order_items WHERE order_uid=? ORDER BY id');
             $stmt->execute([$order['uid']]);
             $order['items'] = $stmt->fetchAll();
+            foreach ($order['items'] as &$item) {
+                $meta = json_decode((string) ($item['metadata'] ?? '{}'), true) ?: [];
+                $item['source_table'] = (string) ($meta['source_table'] ?? '');
+                $item['warehouse'] = array_intersect_key((array) ($meta['warehouse'] ?? []), array_flip(['uid','id','name']));
+                unset($item['metadata']);
+            }
+            unset($item);
+            $order['invoice'] = null;
+            if ($this->schema) {
+                $db = $this->schema->connection($project);
+                $columns = array_column($db->query('PRAGMA table_info(facturas)')->fetchAll(), 'name');
+                if (in_array('uid', $columns, true)) {
+                    $sql = 'SELECT uid,no_factura FROM facturas WHERE uid=?';
+                    $values = ['web_invoice_' . $order['uid']];
+                    if (in_array('operation_uid', $columns, true)) { $sql .= ' OR operation_uid=?'; $values[] = 'web_order_' . $order['uid']; }
+                    $invoice = $db->prepare($sql . ' LIMIT 1'); $invoice->execute($values);
+                    $order['invoice'] = $invoice->fetch() ?: null;
+                }
+            }
             return ['order' => $order];
         }
         if ($operation !== 'list') throw new InvalidArgumentException('Operación de pedidos no válida.');

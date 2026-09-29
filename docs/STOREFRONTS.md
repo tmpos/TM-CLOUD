@@ -22,6 +22,16 @@ El carrito se encuentra en `/store/{slug}/cart` y el checkout en `/store/{slug}/
 
 La página `/store/{slug}/categories` presenta todas las categorías con sus cantidades y permite combinar búsqueda, categoría, rango de precio, disponibilidad y ordenamiento por fecha, precio o nombre.
 
+## Precios y almacén de la tienda
+
+En `/{slug}/admin/web`, los usuarios con rol `owner` o `manager` pueden guardar **Mostrar precios** y el **Almacén de la tienda**. El guardado requiere sesión y protección CSRF. Estos ajustes también están disponibles en la configuración de la tienda del proyecto.
+
+`show_prices` está habilitado por defecto, incluso para tiendas existentes. Al desactivarlo, la tienda funciona como catálogo: muestra «Consultar precio», oculta precios de venta y comparación en las páginas y respuestas públicas, ignora filtros y ordenamientos por precio y bloquea compras web. El POS administrativo conserva sus precios. Volver a activarlo recupera la compra normal sin modificar los precios del inventario.
+
+`warehouse_uid` identifica un almacén de la tabla `empresa` del mismo proyecto. Si está vacío, se utiliza el primero por `id` ascendente. El selector permite elegir otro; si el almacén seleccionado se elimina, no se publica inventario de un almacén diferente como sustituto.
+
+Los productos se filtran por `almacen_uid` y, cuando falta ese valor, por el `almacen_id` heredado. El UID tiene prioridad si ambos campos discrepan. Los registros sin asignación se consideran del primer almacén. Las tablas sin campos de almacén mantienen sus modelos compartidos; las existencias y precios derivados de IMEI o seriales se calculan con el inventario del almacén seleccionado. Los pedidos conservan el almacén utilizado al crearse para que un cambio posterior de configuración no desvíe su descuento de existencias.
+
 ## Checkout, diseño y pagos
 
 La administración de la tienda permite controlar colores, tipografía, bordes, portada, tarjetas, anuncio, redes, datos de contacto, retiro, entrega, envío nacional, tarifa y envío gratis desde un monto.
@@ -57,6 +67,9 @@ La verificación se realiza primero contra la factura y luego contra `clientes`/
 
 ```bash
 php tests/storefront-smoke.php
+php tests/storefront-catalog-settings.php
 ```
 
 La prueba crea un proyecto temporal, confirma la tienda automática, publica un producto sin exponer su costo y valida que una factura solo sea accesible con la identidad correcta.
+
+La prueba de configuración verifica la ocultación pública y los precios internos, el bloqueo de checkout, la selección y el cambio de almacén, la compatibilidad con IDs y UIDs, el filtrado de IMEI/seriales, el descuento y restauración de existencias y que repetir las migraciones conserve los ajustes guardados.

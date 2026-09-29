@@ -87,7 +87,7 @@ final class App
         $storefrontInventory = new StorefrontInventoryService($projects, $schema, $logs, $webhooks);
         $storefrontAdmins = new StorefrontAdminService($db, $storefronts, $storefrontInventory, $logs);
         $portalAuth = new PortalAuth($db);
-        $systemRuntime = new SystemRuntimeService($schema, $logs, $sharedDocuments, $webhooks, $signatures, $customerRegistrations, $spaAppointments, $spaLanding, new \App\Services\StorefrontSettingsService($storefronts), new \App\Services\WebsiteOrdersService($db), new \App\Services\CompanySignatureService($schema, $config));
+        $systemRuntime = new SystemRuntimeService($schema, $logs, $sharedDocuments, $webhooks, $signatures, $customerRegistrations, $spaAppointments, $spaLanding, new \App\Services\StorefrontSettingsService($storefronts), new \App\Services\WebsiteOrdersService($db, $schema), new \App\Services\CompanySignatureService($schema, $config));
         $projectSql = new ProjectSqlApiService($schema, $logs);
         $metrics = new MetricsService($db);
         $migrations = new MigrationService($db, $config['storage']);

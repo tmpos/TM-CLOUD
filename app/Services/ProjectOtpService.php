@@ -92,6 +92,7 @@ final class ProjectOtpService
             ->execute([$mode, $fixedCode, $intervalSeconds, $sendEmail, $secret, $now, self::CONFIG_UID]);
     }
 
+    /** Login only: fixed mode uses the project's local 24-hour clock. */
     public function validateSupportLogin(PDO $db, string $code, string $now): bool
     {
         $code = trim($code);

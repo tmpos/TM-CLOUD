@@ -372,7 +372,7 @@ final class SystemRuntimeService
         }
         if ($channel === 'auditoria:registrar') { $payload = (array) ($args[0] ?? []); $this->audit($db, (string) ($payload['tabla'] ?? 'sistema'), (int) ($payload['registro_id'] ?? 0), (string) ($payload['accion'] ?? 'ACTION'), $actor, $payload['datos_nuevos'] ?? null, $payload['datos_anteriores'] ?? null); return ['success' => true]; }
         if ($channel === 'app:getName') return 'TMPOS Web';
-        if ($channel === 'app:getVersion') return '2.13.3-web';
+        if ($channel === 'app:getVersion') return '6.0.2';
         if ($channel === 'getServerUrl') return ['success' => true, 'url' => '/sistema'];
         if (str_starts_with($channel, 'licencia:')) return ['success' => true, 'estado' => 'activo', 'data' => ['estado' => 'activo', 'nombre_empresa' => $project['name'], 'diasRestantes' => null]];
         if (in_array($channel, ['getPrinters', 'scan:bluetooth'], true)) return ['success' => true, 'data' => []];

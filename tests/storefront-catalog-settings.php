@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 $root = dirname(__DIR__);
+require_once $root . '/vendor/autoload.php';
 foreach ([
     'app/Core/Support.php',
     'app/Core/Database.php',
@@ -79,6 +80,14 @@ try {
     try {$storefronts->updateCatalogSettings($project['uid'],['warehouse_uid'=>'foreign-warehouse']);} catch(InvalidArgumentException){$blocked=true;}
     check($blocked,'Foreign warehouse was accepted.');
     $store = $storefronts->updateCatalogSettings($project['uid'], ['show_prices'=>'0']);
+    check($store['warehouse_uid'] === $second['uid'], 'Changing price visibility reset the selected warehouse.');
+    $settingsBeforeMigration = $store;
+    Database::migrate($db);
+    Database::migrate($db);
+    $store = $storefronts->findForProject($project['uid']);
+    foreach (['uid', 'show_prices', 'warehouse_uid', 'primary_color', 'slug'] as $setting) {
+        check($store[$setting] === $settingsBeforeMigration[$setting], 'Repeated migration changed ' . $setting);
+    }
     $public = $storefronts->catalog($store, '', '', ['min_price'=>900, 'sort'=>'price_desc']);
     check(count($public['products']) === 2, 'Hidden prices can be inferred through filters.');
     foreach ($public['products'] as $product) check($product['price'] === null && $product['compare_price'] === null, 'Public price leaked.');
@@ -91,6 +100,31 @@ try {
     $projectDb=$schema->connection($project);
     $missing=$store; $missing['warehouse_uid']='deleted';
     check($storefronts->catalog($missing)['products']===[],'Deleted warehouse fell back to another warehouse.');
+
+    // Exercise real SQL for imported tables with only numeric IDs or only UIDs.
+    $scopeDb = new PDO('sqlite::memory:');
+    $scopeDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $scopeDb->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    $scopeDb->exec('CREATE TABLE empresa (id INTEGER PRIMARY KEY, nombre TEXT)');
+    $scopeDb->exec("INSERT INTO empresa VALUES (10, 'Principal'), (20, 'Sucursal')");
+    $options = StorefrontService::warehouseOptions($scopeDb);
+    check(array_column($options, 'uid') === ['id:10', 'id:20'], 'Legacy warehouses without UID cannot be selected.');
+    $scopeDb->exec('CREATE TABLE legacy_stock (id INTEGER PRIMARY KEY, almacen_id INTEGER)');
+    $scopeDb->exec('INSERT INTO legacy_stock VALUES (1,10),(2,20),(3,0),(4,NULL)');
+    $scopeDb->exec('CREATE TABLE uid_stock (id INTEGER PRIMARY KEY, almacen_uid TEXT)');
+    $scopeDb->exec("INSERT INTO uid_stock VALUES (1,'id:10'),(2,'id:20'),(3,''),(4,NULL),(5,'unknown')");
+    foreach (['legacy_stock' => ['id', 'almacen_id'], 'uid_stock' => ['id', 'almacen_uid']] as $table => $columns) {
+        foreach ([0 => [1, 3, 4], 1 => [2]] as $index => $expected) {
+            [$condition, $parameters] = StorefrontService::warehouseCondition($columns, $options[$index]);
+            $query = $scopeDb->prepare('SELECT id FROM "' . $table . '" WHERE ' . $condition . ' ORDER BY id');
+            $query->execute($parameters);
+            check(array_map('intval', $query->fetchAll(PDO::FETCH_COLUMN)) === $expected, $table . ' selected the wrong warehouse.');
+        }
+    }
+    $resetStore = $storefronts->updateCatalogSettings($project['uid'], ['warehouse_uid' => '']);
+    check((int) $resetStore['show_prices'] === 0, 'Changing warehouse reset hidden prices.');
+    check($storefronts->warehouseForStore($resetStore)['uid'] === $first['uid'], 'Automatic warehouse did not restore the first warehouse.');
+    $store = $storefronts->updateCatalogSettings($project['uid'], ['warehouse_uid' => $second['uid']]);
 
     // Shared model tables with stock distributed between warehouses.
     $schema->createTable($project, 'telefonos', $fields(['nombre','precio_venta']));

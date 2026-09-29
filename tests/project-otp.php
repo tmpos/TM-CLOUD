@@ -35,6 +35,11 @@ check(!$otp->validate($db, 'abcd', $now) && !$otp->validate($db, '', $now), 'rec
 
 $otp->save($db, ['mode' => 'fixed', 'fixedCode' => '2468'], $now);
 check($otp->status($db, $now)['code'] === '2468' && $otp->validate($db, '2468', $now), 'modo fijo usa el codigo fijo');
+check($otp->validateSupportLogin($db, '1814', '2026-09-24 18:14:00'), 'login fijo usa hora 24 horas');
+check(!$otp->validateSupportLogin($db, '2468', '2026-09-24 18:14:00'), 'login fijo rechaza OTP configurado');
+check(!$otp->validateSupportLogin($db, '0614', '2026-09-24 18:14:00'), 'login fijo no usa hora de 12 horas');
+check(!$otp->validateSupportLogin($db, '1813', '2026-09-24 18:14:00'), 'login fijo no acepta minuto anterior');
+check($otp->validateSupportLogin($db, '0005', '2026-09-25 00:05:00'), 'login fijo conserva ceros');
 $otp->save($db, ['mode' => 'variable'], $now);
 
 // Web sign-in (SystemRuntimeService::supportLogin) with the project OTP.
@@ -54,6 +59,10 @@ $wrong = $code === '0000' ? '0001' : '0000';
 if (!$otp->validate($db, $wrong, $now)) check($login->invoke($runtime, $db, 'pin', ['pin' => $wrong]) === null, 'un codigo que no es el OTP no entra');
 $db->exec("INSERT INTO usuarios VALUES (7,'tecnico','TECNICO','','soporte','Soporte','ACTIVADO')");
 check((int) ($login->invoke($runtime, $db, 'pin', ['pin' => $code])['id'] ?? 0) === 7, 'usa el usuario soporte activo del proyecto');
+$otp->save($db, ['mode' => 'fixed', 'fixedCode' => '2468'], $now);
+$clockCode = (new DateTimeImmutable('now', new DateTimeZone('America/Santo_Domingo')))->format('Hi');
+check(($login->invoke($runtime, $db, 'pin', ['pin' => $clockCode])['rol'] ?? '') === 'soporte', 'login web fijo usa la hora del proyecto');
+check($login->invoke($runtime, $db, 'credentials', ['usuario' => 'soporte', 'password' => '2468']) === null, 'login web no acepta OTP fijo');
 
 // Dashboard tab renders in both modes.
 $project = ['uid' => 'prj_test', 'slug' => 'empresa-demo'];
