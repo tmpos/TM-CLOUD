@@ -56,4 +56,15 @@ ensure($domains->resolve('new.example.com')['status'] === 'pending', 'Changed ho
 ensure($domains->resolve('new.example.com')['verification_token'] !== $rows['store']['verification_token'], 'Proof rotates');
 $domains->remove($p['uid'], $id);
 ensure($domains->resolve('new.example.com') === null, 'Unlink');
+$domains->save($p2['uid'], 'race.example.com', null);
+$race = $domains->all($p2['uid'])[0];
+$racing = new ProjectDomainService($db, $config, static function ($host, $type) use ($domains, $p2, $race) {
+    if ($type === DNS_TXT) {
+        $domains->save($p2['uid'], 'replacement.example.com', null);
+        return [['txt' => 'tmpbase=' . $race['verification_token']]];
+    }
+    return [['ip' => '203.0.113.10']];
+});
+rejected(fn () => $racing->verify($p2['uid'], (int) $race['id']));
+ensure($domains->resolve('replacement.example.com')['status'] === 'pending', 'In-flight verification cannot activate a changed hostname');
 echo "PASS: domain validation, atomic save, DNS ownership, IPv4/IPv6/CNAME, tenant isolation, blocked projects and lifecycle\n";

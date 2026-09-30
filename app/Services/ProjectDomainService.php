@@ -112,10 +112,11 @@ final class ProjectDomainService
             if (!$ips || array_diff(array_map($normalize, $ips), array_map($normalize, $expected))) {
                 throw new \RuntimeException('El dominio debe apuntar únicamente a las IP indicadas. Revisa A/AAAA y desactiva el proxy DNS durante la activación.');
             }
-            $this->db->prepare("UPDATE project_domains SET status='active',verified_at=?,last_error=NULL,tls_ok=0,tls_checked_at=NULL WHERE id=?")
-                ->execute([Support::now(), $id]);
+            $update = $this->db->prepare("UPDATE project_domains SET status='active',verified_at=?,last_error=NULL,tls_ok=0,tls_checked_at=NULL WHERE id=? AND hostname=? AND verification_token=? AND status=?");
+            $update->execute([Support::now(), $id, $row['hostname'], $row['verification_token'], $row['status']]);
+            if ($update->rowCount() !== 1) throw new \RuntimeException('El dominio cambió durante la verificación. Recarga el apartado e inténtalo nuevamente.');
         } catch (\Throwable $e) {
-            $this->db->prepare('UPDATE project_domains SET last_error=? WHERE id=?')->execute([$e->getMessage(), $id]);
+            $this->db->prepare('UPDATE project_domains SET last_error=? WHERE id=? AND verification_token=?')->execute([$e->getMessage(), $id, $row['verification_token']]);
             throw $e;
         }
     }
@@ -145,7 +146,9 @@ final class ProjectDomainService
             if ($socket) { fclose($socket); $ok = true; break; }
         }
         $message = $ok ? null : 'El certificado HTTPS aún no está listo. Espera un minuto y vuelve a comprobar; revisa DNS y los registros CAA si persiste.';
-        $this->db->prepare('UPDATE project_domains SET tls_ok=?,tls_checked_at=?,last_error=? WHERE id=?')->execute([(int) $ok, Support::now(), $message, $id]);
+        $update = $this->db->prepare("UPDATE project_domains SET tls_ok=?,tls_checked_at=?,last_error=? WHERE id=? AND hostname=? AND verification_token=? AND status='active'");
+        $update->execute([(int) $ok, Support::now(), $message, $id, $row['hostname'], $row['verification_token']]);
+        if ($update->rowCount() !== 1) throw new \RuntimeException('El dominio cambió durante la comprobación. Recarga el apartado.');
         if (!$ok) throw new \RuntimeException($message);
     }
 
