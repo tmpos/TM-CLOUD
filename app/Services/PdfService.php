@@ -147,6 +147,7 @@ final class PdfService
     {
         $invoice = $this->documentIdentity($invoice);
         $quote = $this->isQuotation($invoice);
+        if (!$quote) $invoice = $this->withFiscalPrintData($project, $invoice);
         $design = (new DocumentSettingsService($this->schema))->get($project);
         $company = $this->companyData($project, $invoice);
         $client = $this->documentCustomer($project, $invoice);
@@ -334,6 +335,37 @@ final class PdfService
             $invoice['uid'] ?? ''
         ));
         return '<div style="border-top:1px solid #d8e2ea;padding-top:3mm;font-size:8px;color:#8494a3"><table width="100%"><tr><td>' . $companyName . '</td><td style="text-align:right">' . $documentTitle . ' ' . $invoiceNumber . ' | {PAGENO}/{nbpg}</td></tr></table></div>';
+    }
+
+    private function withFiscalPrintData(array $project, array $invoice): array
+    {
+        $decode = static function (mixed $value): array {
+            if (is_string($value)) $value = json_decode($value, true);
+            return is_array($value) ? $value : [];
+        };
+        $other = $decode($invoice['otro'] ?? []);
+        $ecf = [];
+        foreach ($this->byForeignReference($project, 'facturas_ecf', 'factura_id', $invoice) as $candidate) {
+            if (!empty($invoice['ncf']) && ($candidate['ncf'] ?? '') === $invoice['ncf']) $ecf = $candidate;
+        }
+        $response = $decode($ecf['response'] ?? $other['alanube_response'] ?? $invoice['alanube_response'] ?? []);
+        foreach ([$ecf['document_stamp_url'] ?? '', $invoice['document_stamp_url'] ?? '', $invoice['documentStampUrl'] ?? '', $other['documentStampUrl'] ?? '', $other['document_stamp_url'] ?? '', $response['documentStampUrl'] ?? '', $response['document_stamp_url'] ?? ''] as $url) {
+            $url = html_entity_decode(trim((string) $url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($this->isTrustedDgiiUrl($url)) { $invoice['alanube_stamp_url'] = $url; break; }
+        }
+        $invoice['alanube_security_code'] = $this->firstValue($ecf['security_code'] ?? '', $invoice['alanube_security_code'] ?? '', $invoice['codigo_seguridad'] ?? '', $response['securityCode'] ?? '', $response['security_code'] ?? '');
+        $payload = $decode($ecf['payload'] ?? $other['alanube_payload'] ?? $invoice['alanube_payload'] ?? []);
+        $totals = $payload['totals'] ?? [];
+        $tax = $totals['itbisTotal'] ?? null;
+        $total = $totals['totalAmount'] ?? null;
+        if (!empty($invoice['ncf']) && ($payload['idDoc']['encf'] ?? '') === $invoice['ncf']
+            && is_numeric($tax) && is_numeric($total) && is_numeric($invoice['total'] ?? null)
+            && (float) $tax >= 0 && (float) $tax <= (float) $total
+            && abs((float) $total - (float) $invoice['total']) <= 0.01) {
+            $invoice['impuesto_monto'] = (float) $tax;
+            $invoice['subtotal'] = round((float) $invoice['total'] - (float) $tax + (float) ($invoice['descuento_monto'] ?? $invoice['descuento'] ?? 0), 2);
+        }
+        return $invoice;
     }
 
     private function dgiiVerificationUrl(array $company, array $client, array $invoice, string $ncf, string $securityCode): string

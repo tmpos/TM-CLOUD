@@ -63,6 +63,23 @@ $invoice = [
 ];
 
 try {
+    $fiscalUrl = 'https://ecf.dgii.gov.do/ecf/ConsultaTimbre?ENCF=E310000000004&FechaFirma=30-09-2026%2011:24:26&CodigoSeguridad=example';
+    $includedInvoice = array_replace($invoice, [
+        'ncf' => 'E310000000004', 'subtotal' => 620, 'total' => 620, 'impuesto_monto' => '', 'impuesto' => '',
+        'alanube_stamp_url' => '', 'alanube_security_code' => '',
+        'otro' => json_encode([
+            'alanube_payload' => ['idDoc' => ['encf' => 'E310000000004'], 'totals' => ['itbisTotal' => 107.6, 'totalAmount' => 620]],
+            'alanube_response' => ['documentStampUrl' => $fiscalUrl, 'securityCode' => 'example'],
+        ]),
+    ]);
+    $includedHtml = $service->invoiceHtml($project, $includedInvoice);
+    foreach (['107.60', '512.40', '620.00', htmlspecialchars($fiscalUrl, ENT_QUOTES, 'UTF-8'), 'example'] as $expected) {
+        if (!str_contains($includedHtml, $expected)) throw new RuntimeException('Included fiscal tax or issued QR missing: ' . $expected);
+    }
+    $mismatch = array_replace($includedInvoice, ['total' => 621]);
+    if (str_contains($service->invoiceHtml($project, $mismatch), '107.60')) throw new RuntimeException('Stale fiscal totals used.');
+    $invalidUrlInvoice = array_replace($includedInvoice, ['otro' => json_encode(['alanube_response' => ['documentStampUrl' => 'https://dgii.gov.do.evil.test/qr']])]);
+    if (str_contains($service->invoiceHtml($project, $invalidUrlInvoice), 'evil.test')) throw new RuntimeException('Untrusted QR accepted.');
     $datedInvoice = array_replace($invoice, ['fecha_emision' => '2026-09-28', 'hora' => '09:15']);
     if (!str_contains($service->invoiceHtml($project, $datedInvoice), '28/09/2026 09:15 AM')) throw new RuntimeException('Separate POS time was lost.');
     $datedInvoice['fecha_emision'] = '2026-09-29T02:15:00Z';
