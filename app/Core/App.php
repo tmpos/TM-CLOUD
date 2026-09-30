@@ -55,6 +55,10 @@ final class App
         self::ensureStorage($config['storage']);
         $db = Database::connect($config['database']);
         Database::migrate($db);
+        \App\Services\ProjectDomainService::migrate($db);
+        $domains = new \App\Services\ProjectDomainService($db, $config);
+        \App\Core\ProjectDomainRequest::apply($domains, $config);
+        if (!empty($_SERVER['TMPBASE_PROJECT_DOMAIN'])) $config['url'] = 'https://' . $_SERVER['TMPBASE_PROJECT_DOMAIN'];
 
         $logs = new LogService($db);
         $projects = new ProjectService($db, $config, $logs);
@@ -94,6 +98,7 @@ final class App
         $alerts = new AlertService($db, $config, $projects, $metrics, $backups, $mail, $logs);
         $support = new SupportService($db, $config);
         $onboarding = new ClientOnboardingService($db, $config, $logs, $projects, $schema, $storage, $licenses, $mail);
+        (new \App\Controllers\ProjectDomainController($domains, $projects, $logs, $config))->register();
 
         (new WebController($config, $auth, $installer, $db, $projects, $schema, $records, $transfer, $logs, $backups, $storage, $webhooks, $licenses, $databaseBridge, $pdf, $functions, $metrics, $migrations, $mail, $apkFiles, $systemApps, $realtime, $support, $onboarding))->register();
         (new PortalController($config, $portalAuth, $projects, $schema, $records, $pdf, $sharedDocuments, $keys))->register();

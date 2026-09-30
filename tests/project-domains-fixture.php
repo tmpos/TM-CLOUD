@@ -1,0 +1,24 @@
+<?php
+declare(strict_types=1);
+if (PHP_SAPI !== 'cli' || getenv('APP_ENV') !== 'test') throw new RuntimeException('Disposable test environment only.');
+require dirname(__DIR__) . '/vendor/autoload.php';
+$config = require dirname(__DIR__) . '/config/app.php';
+$db = \App\Core\Database::connect($config['database']);
+\App\Core\Database::migrate($db);
+\App\Services\ProjectDomainService::migrate($db);
+$auth = new \App\Core\Auth($db);
+if ($auth->installed()) throw new RuntimeException('Fixture requires an empty database.');
+$auth->install('Domain test', 'domains@example.test', 'Disposable-domain-test-2026');
+$logs = new \App\Services\LogService($db);
+$projects = new \App\Services\ProjectService($db, $config, $logs);
+$project = $projects->create(['name' => 'Domain Fixture', 'slug' => 'domain-fixture']);
+$schema = new \App\Services\SchemaService($projects, $logs);
+$connection = $schema->connection($project);
+$connection->exec("CREATE TABLE usuarios(id INTEGER PRIMARY KEY,uid TEXT,nombre TEXT,usuario TEXT,pin TEXT,estado TEXT,rol TEXT,nivel_seguridad TEXT,permisos TEXT)");
+$connection->exec("INSERT INTO usuarios VALUES(1,'fixture-user','Fixture','fixture','9876','ACTIVADO','administrador','Administrador','')");
+$domains = new \App\Services\ProjectDomainService($db, $config);
+$domains->save($project['uid'], 'shop.example.test', 'system.example.test');
+$db->exec("UPDATE project_domains SET status='active',verified_at=datetime('now')");
+file_put_contents($config['storage'] . '/domain-routing-status.json', json_encode(['updated_at' => time(), 'hosts' => ['shop.example.test','system.example.test']]));
+file_put_contents($config['storage'] . '/fixture-project.json', json_encode(['uid' => $project['uid']]));
+echo 'Fixture project: ' . $project['uid'] . "\n";

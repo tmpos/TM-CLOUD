@@ -9,6 +9,10 @@ return [
     'url' => rtrim(getenv('APP_URL') ?: 'http://localhost:8000', '/'),
     'env' => getenv('APP_ENV') ?: 'production',
     'debug' => filter_var(getenv('APP_DEBUG') ?: false, FILTER_VALIDATE_BOOL),
+    'domains' => [
+        'ips' => array_values(array_filter(array_map('trim', explode(',', (string) (getenv('PROJECT_DOMAIN_IPS') ?: ''))), static fn ($ip) => filter_var($ip, FILTER_VALIDATE_IP))),
+        'reserved' => array_values(array_filter(array_map('trim', explode(',', (string) (getenv('PROJECT_DOMAIN_RESERVED') ?: ''))))),
+    ],
     'root' => $root,
     'storage' => $root . DIRECTORY_SEPARATOR . 'storage',
     'database' => $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'tmpbase.sqlite',

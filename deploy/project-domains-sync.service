@@ -1,0 +1,13 @@
+[Unit]
+Description=TMPBase project domain routing
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/tmpbase-domain-routing/project-domains-sync.py --database /opt/tmposystem-storage/tmpbase.sqlite --output /etc/dokploy/traefik/dynamic/tmpbase-project-domains.yml --status /opt/tmposystem-storage/domain-routing-status.json --service tmpos-system-api-73trsf-service-12@file
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/dokploy/traefik/dynamic /opt/tmposystem-storage
+TimeoutStartSec=30
