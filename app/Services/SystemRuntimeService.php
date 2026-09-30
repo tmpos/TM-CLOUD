@@ -748,8 +748,22 @@ final class SystemRuntimeService
             $stmt = $db->prepare("SELECT * FROM facturas WHERE id=? AND UPPER(COALESCE(estado_factura,''))='PENDIENTE'"); $stmt->execute([$id]);
             $factura = $stmt->fetch() ?: throw new RuntimeException('La factura no esta pendiente.');
             $total = (float) ($factura['total'] ?? 0); $efectivo=(float)($p['efectivo']??0); $tarjeta=(float)($p['tarjeta']??0); $transferencia=(float)($p['transferencia']??0);
+            foreach ([$efectivo, $tarjeta, $transferencia] as $amount) {
+                if (!is_finite($amount) || $amount < 0) throw new InvalidArgumentException('Importe de pago invalido.');
+            }
             if (abs(($efectivo+$tarjeta+$transferencia)-$total) >= .01) throw new InvalidArgumentException('La distribucion del pago no coincide con el total.');
-            $db->prepare("UPDATE facturas SET estado_factura='PAGADA', metodo_pago=?, efectivo=?, tarjeta=?, transferencia=?, updated_at=? WHERE id=?")->execute([(string)($p['metodo_pago']??''),$efectivo,$tarjeta,$transferencia,$this->now(),$id]);
+            $received = array_key_exists('efectivo_recibido', $p) ? $p['efectivo_recibido'] : $efectivo;
+            if (!is_numeric($received) || !is_finite((float) $received) || (float) $received < 0 || round((float) $received * 100) < round($efectivo * 100)) {
+                throw new InvalidArgumentException('El efectivo recibido debe cubrir el importe en efectivo.');
+            }
+            $other = json_decode((string) ($factura['otro'] ?? '{}'), true);
+            if (!is_array($other)) $other = [];
+            $other['cobro_caja'] = [
+                'metodo_pago' => (string) ($p['metodo_pago'] ?? ''), 'efectivo' => $efectivo, 'tarjeta' => $tarjeta, 'transferencia' => $transferencia,
+                'efectivo_recibido' => round((float) $received, 2), 'cambio' => (round((float) $received * 100) - round($efectivo * 100)) / 100,
+                'observacion' => mb_substr(trim((string) ($p['observacion'] ?? '')), 0, 500), 'fecha' => $this->now(),
+            ];
+            $db->prepare("UPDATE facturas SET estado_factura='PAGADA', metodo_pago=?, efectivo=?, tarjeta=?, transferencia=?, otro=?, updated_at=? WHERE id=?")->execute([(string)($p['metodo_pago']??''),$efectivo,$tarjeta,$transferencia,json_encode($other, JSON_UNESCAPED_UNICODE),$this->now(),$id]);
             if ((int)($p['banco_id']??0)>0 && $tarjeta+$transferencia>0) $db->prepare('UPDATE bancos SET saldo=saldo+?, updated_at=? WHERE id=?')->execute([$tarjeta+$transferencia,$this->now(),(int)$p['banco_id']]);
             $this->webhooks->dispatch('record.updated', $project, 'facturas', $this->row($db, 'facturas', $id));
             $db->commit(); return ['success'=>true,'data'=>['id'=>$id]];

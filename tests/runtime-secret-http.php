@@ -42,5 +42,22 @@ try {
     verifyRuntime($pdo->query('SELECT almacen_uid FROM productos')->fetchColumn()==='warehouse','Assignment not saved');
     $result=$request($project['secret_key'],'documentos:crearEnlaceFirmaRepresentante',['representative_name'=>'Test']);
     verifyRuntime(($result['success']??false)===true && ($result['data']['request']['status']??'')==='pending','Secret signature request rejected');
+    $pdo->exec("CREATE TABLE facturas(id INTEGER PRIMARY KEY,uid TEXT,estado_factura TEXT,metodo_pago TEXT,total REAL,efectivo REAL,tarjeta REAL,transferencia REAL,otro TEXT,updated_at TEXT)");
+    $pdo->exec("INSERT INTO facturas VALUES(1,'cash-test','PENDIENTE','',720,0,0,0,'{}',NULL)");
+    $pdo->exec("UPDATE facturas SET otro='{}'");
+    $pdo->prepare('UPDATE facturas SET otro=?')->execute([json_encode(['fiscal_preserved'=>true])]);
+    $cashArgs=['factura_id'=>1,'metodo_pago'=>'EFECTIVO','efectivo'=>720,'transferencia'=>0,'tarjeta'=>0,'efectivo_recibido'=>700];
+    $result=$request($project['secret_key'],'ventas:cobrarPendiente',$cashArgs);
+    verifyRuntime(($result['success']??false)!==true,'Insufficient cash accepted');
+    verifyRuntime($pdo->query('SELECT estado_factura FROM facturas WHERE id=1')->fetchColumn()==='PENDIENTE','Rejected collection changed invoice');
+    $cashArgs['efectivo_recibido']=1000;
+    $result=$request($project['secret_key'],'ventas:cobrarPendiente',$cashArgs);
+    verifyRuntime(($result['success']??false)===true,'Cash collection failed: '.json_encode($result));
+    $paid=$pdo->query('SELECT * FROM facturas WHERE id=1')->fetch(PDO::FETCH_ASSOC);
+    $other=json_decode($paid['otro'],true);
+    verifyRuntime((float)$paid['efectivo']===720.0 && (float)$paid['total']===720.0,'Tender inflated revenue');
+    verifyRuntime(($other['cobro_caja']['efectivo_recibido']??0)==1000 && ($other['cobro_caja']['cambio']??0)==280 && $other['fiscal_preserved']===true,'Tender or metadata not preserved');
+    $result=$request($project['secret_key'],'ventas:cobrarPendiente',$cashArgs);
+    verifyRuntime(($result['success']??false)!==true,'Duplicate collection accepted');
     echo "RUNTIME_SECRET_HTTP=OK real endpoint, Secret accepted, Public/missing/invalid denied, payload spoofing denied\n";
 } finally { proc_terminate($process); proc_close($process); }
