@@ -159,6 +159,7 @@ final class PdfService
         if (!$details) {
             $details = $this->inlineInvoiceDetails($invoice);
         }
+        $lineTaxes = isset($invoice['_fiscal_print_payload']) ? FiscalLineTaxes::calculate($invoice['_fiscal_print_payload'], $details) : null;
         $payments = $this->byForeignReference($project, 'factura_pagos', 'factura_id', $invoice);
 
         $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -363,6 +364,7 @@ final class PdfService
             && (float) $tax >= 0 && (float) $tax <= (float) $total
             && abs((float) $total - (float) $invoice['total']) <= 0.01) {
             $invoice['impuesto_monto'] = (float) $tax;
+            $invoice['_fiscal_print_payload'] = $payload;
             $invoice['subtotal'] = round((float) $invoice['total'] - (float) $tax + (float) ($invoice['descuento_monto'] ?? $invoice['descuento'] ?? 0), 2);
         }
         return $invoice;

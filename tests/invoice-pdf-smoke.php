@@ -68,11 +68,19 @@ try {
         'ncf' => 'E310000000004', 'subtotal' => 620, 'total' => 620, 'impuesto_monto' => '', 'impuesto' => '',
         'alanube_stamp_url' => '', 'alanube_security_code' => '',
         'otro' => json_encode([
-            'alanube_payload' => ['idDoc' => ['encf' => 'E310000000004'], 'totals' => ['itbisTotal' => 107.6, 'totalAmount' => 620]],
+            'alanube_payload' => ['idDoc' => ['encf' => 'E310000000004'], 'totals' => ['itbisTotal' => 107.6, 'itbis1Total' => 107.6, 'totalAmount' => 620], 'itemDetails' => [['lineNumber' => 1, 'itemName' => 'Cena especial', 'quantityItem' => 2, 'itemAmount' => 512.4, 'billingIndicator' => 1]]],
             'alanube_response' => ['documentStampUrl' => $fiscalUrl, 'securityCode' => 'example'],
         ]),
     ]);
     $includedHtml = $service->invoiceHtml($project, $includedInvoice);
+    if (!preg_match('/class="num line-tax">[^<]*107\.60/', $includedHtml)) throw new RuntimeException('Fiscal line tax missing.');
+    $items = [['nombre' => 'A', 'cantidad' => 1], ['nombre' => 'B', 'cantidad' => 1], ['nombre' => 'C', 'cantidad' => 1]];
+    $allocation = App\Services\FiscalLineTaxes::calculate(['totals' => ['itbis1Total' => 0.01, 'itbisTotal' => 0.01], 'itemDetails' => [
+        ['lineNumber' => 1, 'itemName' => 'A', 'quantityItem' => 1, 'itemAmount' => 1, 'billingIndicator' => 1],
+        ['lineNumber' => 2, 'itemName' => 'B', 'quantityItem' => 1, 'itemAmount' => 1, 'billingIndicator' => 1],
+        ['lineNumber' => 3, 'itemName' => 'C', 'quantityItem' => 1, 'itemAmount' => 1, 'billingIndicator' => 4],
+    ]], $items);
+    if ($allocation !== [0.01, 0, 0.0] && $allocation !== [0.01, 0.0, 0.0]) throw new RuntimeException('Tax rounding/exemption failed.');
     foreach (['107.60', '512.40', '620.00', htmlspecialchars($fiscalUrl, ENT_QUOTES, 'UTF-8'), 'example'] as $expected) {
         if (!str_contains($includedHtml, $expected)) throw new RuntimeException('Included fiscal tax or issued QR missing: ' . $expected);
     }
