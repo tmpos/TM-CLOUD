@@ -160,6 +160,7 @@ final class PdfService
             $details = $this->inlineInvoiceDetails($invoice);
         }
         $lineTaxes = isset($invoice['_fiscal_print_payload']) ? FiscalLineTaxes::calculate($invoice['_fiscal_print_payload'], $details) : null;
+        $lineTaxes ??= array_map(static fn (array $item): float => (float) ($item['impuesto_venta'] ?? $item['impuesto'] ?? 0) * (float) ($item['cantidad'] ?? 1), $details);
         $payments = $this->byForeignReference($project, 'factura_pagos', 'factura_id', $invoice);
 
         $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -652,6 +653,7 @@ final class PdfService
                 'descripcion' => trim((string) ($item['descripcion'] ?? '')),
                 'cantidad' => $quantity > 0 ? $quantity : 1,
                 'precio_unitario' => $unit,
+                'impuesto' => (float) ($item['impuesto_venta'] ?? $item['impuesto'] ?? 0),
                 'total' => (float) ($item['total'] ?? $item['importe'] ?? (($quantity > 0 ? $quantity : 1) * $unit)),
                 'notas' => implode(' · ', array_values(array_unique($notes))),
             ];

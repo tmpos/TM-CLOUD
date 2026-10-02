@@ -214,6 +214,18 @@ try {
 
 
     foreach ([$invoice, array_replace($invoice, ['tipo_factura'=>'COTIZACION'])] as $visibilityInvoice) {
+        $zeroTaxInvoice = array_replace($visibilityInvoice, ['impuesto_monto'=>0, 'impuesto'=>0, 'alanube_stamp_url'=>'']);
+        foreach ([[true,true], [true,false], [false,true], [false,false]] as [$taxVisible, $lineTaxVisible]) {
+            $designs->save($project, ['visibility'=>['tax'=>$taxVisible, 'line_tax'=>$lineTaxVisible]]);
+            $zeroHtml = $service->invoiceHtml($project, $zeroTaxInvoice);
+            if ((bool) preg_match('/<tr><td>ITBIS<\/td><td>.*?0\.00<\/td><\/tr>/', $zeroHtml) !== $taxVisible) throw new RuntimeException('Zero total tax did not respect its toggle.');
+            if (str_contains($zeroHtml, '<th>ITBIS</th>') !== $lineTaxVisible) throw new RuntimeException('Zero line tax did not respect its toggle.');
+            if ($lineTaxVisible && !preg_match('/class="num line-tax">.*?0\.00<\/td>/', $zeroHtml)) throw new RuntimeException('Zero line tax missing.');
+        }
+        $designs->save($project, $designs::defaults());
+        if (!str_starts_with($service->invoice($project, 'facturas', $zeroTaxInvoice), '%PDF-')) throw new RuntimeException('Zero tax PDF failed.');
+        $storedTaxInvoice = array_replace($zeroTaxInvoice, ['id'=>999, 'uid'=>'stored-tax-test', 'productos'=>json_encode([['nombre'=>'Taxed item', 'cantidad'=>2, 'precio'=>100, 'impuesto_venta'=>18]])]);
+        if (!preg_match('/class="num line-tax">.*?36\.00<\/td>/', $service->invoiceHtml($project, $storedTaxInvoice))) throw new RuntimeException('Stored product tax replaced with zero.');
         $designs->save($project, ['visibility'=>['quantity'=>false, 'price'=>false, 'line_total'=>false, 'customer_email'=>false, 'total'=>false]]);
         $hidden = $service->invoiceHtml($project, $visibilityInvoice);
         foreach (['CANT.', 'P.U.', 'cliente@example.com', '<tr class="grand">'] as $unexpected) {
