@@ -283,16 +283,25 @@ try {
     // Imported company rows can retain another warehouse's almacen_uid. The
     // document's exact company UID must win, even with a stale numeric ID.
     $db->exec("ALTER TABLE empresa ADD COLUMN almacen_uid TEXT");
+    $db->exec("ALTER TABLE empresa ADD COLUMN marca_registrada TEXT");
+    $db->exec("UPDATE empresa SET marca_registrada='MAIN TRADEMARK' WHERE uid='main'");
+    $db->prepare("UPDATE empresa SET marca_registrada=? WHERE uid='second'")->execute(['Marca & Asociados <SRL>']);
     $db->exec("UPDATE empresa SET almacen_uid='second'");
     $db->exec("UPDATE empresa SET rnc='SECOND-RNC', direccion='SECOND ADDRESS', telefono='809-555-0404', email='second@example.com' WHERE uid='second'");
     foreach (['FACTURA', 'COTIZACION'] as $documentType) {
         $scopedDocument = array_replace($scopedInvoice, ['tipo_factura' => $documentType]);
         $scopedHtml = $service->invoiceHtml($project, $scopedDocument);
+        $trademark = '<div class="company-trademark" style="font-weight:bold;margin-bottom:3px">Marca &amp; Asociados &lt;SRL&gt;</div>';
+        if (!str_contains($scopedHtml, $trademark) || strpos($scopedHtml, $trademark) > strpos($scopedHtml, 'RNC SECOND-RNC')) throw new RuntimeException('Warehouse trademark missing, unescaped or below the tax ID.');
+        if (str_contains($scopedHtml, 'MAIN TRADEMARK')) throw new RuntimeException('Warehouse inherited the main trademark.');
         foreach (['SECOND COMPANY', 'SECOND-RNC', 'SECOND ADDRESS', '809-555-0404', 'second@example.com', $logo] as $expected) {
             if (!str_contains($scopedHtml, $expected)) throw new RuntimeException("Warehouse $documentType field missing with conflicting alias: $expected");
         }
         if (str_contains($scopedHtml, 'TM RESTAURANTE')) throw new RuntimeException('Conflicting warehouse alias selected the main company.');
         if (!str_starts_with($service->invoice($project, 'facturas', $scopedDocument), '%PDF-')) throw new RuntimeException('Warehouse document PDF did not render.');
+        $db->exec("UPDATE empresa SET marca_registrada='  ' WHERE uid='second'");
+        if (str_contains($service->invoiceHtml($project, $scopedDocument), 'class="company-trademark"')) throw new RuntimeException('Empty trademark rendered.');
+        $db->prepare("UPDATE empresa SET marca_registrada=? WHERE uid='second'")->execute(['Marca & Asociados <SRL>']);
     }
     $db->exec("UPDATE empresa SET almacen_uid='legacy-second' WHERE uid='second'");
     $legacyInvoice = array_replace($scopedInvoice, ['almacen_uid'=>'legacy-second']);

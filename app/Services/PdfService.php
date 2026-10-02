@@ -186,6 +186,7 @@ final class PdfService
         $clientPhone = $e($this->firstValue($invoice['telefono_cliente'] ?? '', $invoice['customer_phone'] ?? '', $client['telefono'] ?? '', $client['whatsapp'] ?? ''));
         $clientEmail = $e($this->firstValue($invoice['email_cliente'] ?? '', $invoice['correo_cliente'] ?? '', $invoice['customer_email'] ?? '', $client['email'] ?? '', $client['correo'] ?? ''));
         $companyRnc = $e($company['rnc'] ?? '');
+        $companyTrademark = $e(trim((string) ($company['marca_registrada'] ?? '')));
         $companyAddress = $e($company['direccion'] ?? '');
         $companyPhone = $e($company['telefono'] ?? '');
         $companyEmail = $e($company['email'] ?? '');
@@ -311,6 +312,7 @@ final class PdfService
 
         return [
             'nombre' => $this->firstValue($table['nombre'] ?? '', $license['nombre'] ?? '', $invoice['empresa_nombre'] ?? '', $invoice['emisor_nombre'] ?? '', $project['name'] ?? ''),
+            'marca_registrada' => trim((string) ($table['marca_registrada'] ?? '')),
             'rnc' => $this->firstValue($table['rnc'] ?? '', $table['legal'] ?? '', $license['rnc'] ?? '', $invoice['rnc_emisor'] ?? '', $invoice['emisor_rnc'] ?? '', $invoice['empresa_rnc'] ?? '', $stampRnc),
             'telefono' => $this->firstValue($table['telefono'] ?? '', $license['telefono'] ?? '', $invoice['empresa_telefono'] ?? '', $invoice['emisor_telefono'] ?? ''),
             'email' => $this->firstValue($table['email'] ?? '', $license['email'] ?? '', $invoice['empresa_email'] ?? '', $invoice['emisor_email'] ?? ''),
