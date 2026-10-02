@@ -289,9 +289,14 @@ final class PdfService
             $table = [];
             try {
                 $companies = $this->schema->connection($project)->query('SELECT * FROM empresa')->fetchAll();
-                $matches = array_values(array_filter($companies, static fn (array $row): bool => $warehouseUid !== ''
-                    ? (string) ($row['uid'] ?? '') === $warehouseUid || (string) ($row['almacen_uid'] ?? '') === $warehouseUid
-                    : (int) (($row['almacen_id'] ?? 0) ?: ($row['id'] ?? 0)) === $warehouseId));
+                // uid identifies the company itself. Legacy almacen_uid values can
+                // point at another company, so consult them only without an exact match.
+                $matches = $warehouseUid !== ''
+                    ? array_values(array_filter($companies, static fn (array $row): bool => trim((string) ($row['uid'] ?? '')) === $warehouseUid))
+                    : array_values(array_filter($companies, static fn (array $row): bool => (int) (($row['almacen_id'] ?? 0) ?: ($row['id'] ?? 0)) === $warehouseId));
+                if ($warehouseUid !== '' && count($matches) === 0) {
+                    $matches = array_values(array_filter($companies, static fn (array $row): bool => trim((string) ($row['almacen_uid'] ?? '')) === $warehouseUid));
+                }
                 if (count($matches) === 1) $table = $matches[0];
             } catch (\Throwable) { }
         }

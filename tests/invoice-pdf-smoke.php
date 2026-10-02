@@ -268,6 +268,26 @@ try {
     $scopedInvoice = array_replace($invoice, ['almacen_uid'=>'second', 'almacen_id'=>1, 'alanube_stamp_url'=>'']);
     $scopedHtml = $service->invoiceHtml($project, $scopedInvoice);
     if (!str_contains($scopedHtml,'SECOND COMPANY') || str_contains($scopedHtml,'TM RESTAURANTE')) throw new RuntimeException('Invoice used the wrong company.');
+    // Imported company rows can retain another warehouse's almacen_uid. The
+    // document's exact company UID must win, even with a stale numeric ID.
+    $db->exec("ALTER TABLE empresa ADD COLUMN almacen_uid TEXT");
+    $db->exec("UPDATE empresa SET almacen_uid='second'");
+    $db->exec("UPDATE empresa SET rnc='SECOND-RNC', direccion='SECOND ADDRESS', telefono='809-555-0404', email='second@example.com' WHERE uid='second'");
+    foreach (['FACTURA', 'COTIZACION'] as $documentType) {
+        $scopedDocument = array_replace($scopedInvoice, ['tipo_factura' => $documentType]);
+        $scopedHtml = $service->invoiceHtml($project, $scopedDocument);
+        foreach (['SECOND COMPANY', 'SECOND-RNC', 'SECOND ADDRESS', '809-555-0404', 'second@example.com', $logo] as $expected) {
+            if (!str_contains($scopedHtml, $expected)) throw new RuntimeException("Warehouse $documentType field missing with conflicting alias: $expected");
+        }
+        if (str_contains($scopedHtml, 'TM RESTAURANTE')) throw new RuntimeException('Conflicting warehouse alias selected the main company.');
+        if (!str_starts_with($service->invoice($project, 'facturas', $scopedDocument), '%PDF-')) throw new RuntimeException('Warehouse document PDF did not render.');
+    }
+    $db->exec("UPDATE empresa SET almacen_uid='legacy-second' WHERE uid='second'");
+    $legacyInvoice = array_replace($scopedInvoice, ['almacen_uid'=>'legacy-second']);
+    if (!str_contains($service->invoiceHtml($project, $legacyInvoice), 'SECOND ADDRESS')) throw new RuntimeException('Unique legacy warehouse alias stopped resolving.');
+    $db->exec("UPDATE empresa SET almacen_uid='ambiguous'");
+    $ambiguousInvoice = array_replace($scopedInvoice, ['almacen_uid'=>'ambiguous']);
+    if (str_contains($service->invoiceHtml($project, $ambiguousInvoice), 'SECOND ADDRESS')) throw new RuntimeException('Ambiguous legacy alias selected a company.');
     $db->exec("UPDATE empresa SET logo='' WHERE uid='second'");
     if (str_contains($service->invoiceHtml($project,$scopedInvoice), '<img src="data:image')) throw new RuntimeException('Empty company logo inherited another logo.');
     $scopedInvoice['almacen_uid']='missing';
