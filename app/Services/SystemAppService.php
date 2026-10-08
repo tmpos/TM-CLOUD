@@ -202,7 +202,8 @@ final class SystemAppService
 
     private function extractStaticFiles(ZipArchive $zip, string $staging): void
     {
-        $allowed = ['html','htm','css','js','mjs','cjs','json','map','png','jpg','jpeg','gif','webp','svg','ico','avif','woff','woff2','ttf','otf','eot','txt','xml','webmanifest','wasm','mp3','mp4','webm','wav','ogg','pdf'];
+        // ONNX contiene los modelos de reconocimiento facial del cliente web.
+        $allowed = ['html','htm','css','js','mjs','cjs','json','map','png','jpg','jpeg','gif','webp','svg','ico','avif','woff','woff2','ttf','otf','eot','txt','xml','webmanifest','wasm','onnx','mp3','mp4','webm','wav','ogg','pdf'];
         $total = 0;
         if ($zip->numFiles < 1 || $zip->numFiles > 10000) throw new InvalidArgumentException('El ZIP esta vacio o contiene demasiados archivos.');
         for ($i = 0; $i < $zip->numFiles; $i++) {
