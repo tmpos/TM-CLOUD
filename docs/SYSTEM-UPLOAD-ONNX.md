@@ -36,3 +36,17 @@ La actualización ONNX del 08/10/2026 parte de la imagen activa y cambia solo
 anteriores quedan en `/opt/tmposystem-releases/upload-onnx-20261008/`.
 Para revertir el código, usar la imagen de `previous-image.txt` conservando los
 montajes persistentes; no restaurar ni reemplazar las bases de datos.
+
+## Resultado de publicación
+
+- GitHub: corrección `65170aa` en `main`.
+- VPS: imagen `tmpos-system-api-73trsf:upload-onnx-20261008`, actualización Swarm completada.
+- Los 6598 archivos existentes coinciden con el manifiesto SHA-256 anterior.
+- Los dos montajes de interfaces también se registraron en Dokploy.
+- TM-GYM se agregó a `public/system-apps/tm-gym`, a partir del ZIP de 291
+  archivos, sin cambiar las asignaciones de proyectos.
+- La prueba HTTP aislada aceptó ese ZIP y rechazó sobrescribir el mismo slug;
+  conservó tanto la interfaz predeterminada como otra aplicación existente.
+- El acceso directo a `system-apps/<slug>/index.html` sigue protegido por
+  `.htaccess`; la entrada habitual es `/sistema/<slug-del-proyecto>` después
+  de seleccionar la interfaz del proyecto en el panel.
