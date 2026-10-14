@@ -19,6 +19,7 @@ use Flight;
 
 final class StorefrontController
 {
+    use StorefrontCheckoutCustomer;
     public function __construct(
         private array $config,
         private StorefrontService $storefronts,
@@ -35,12 +36,14 @@ final class StorefrontController
     public function register(): void
     {
         Flight::route('GET /store/@slug', fn ($slug) => $this->home((string) $slug));
+        Flight::route('GET /store/@slug/sitemap.xml', fn ($slug) => $this->seoSitemap((string) $slug));
         Flight::route('GET /store/@slug/pages/@page', fn ($slug, $page) => $this->informationPage((string) $slug, (string) $page));
         Flight::route('POST /store/@slug/pages/contacto', fn ($slug) => $this->contactSubmit((string) $slug));
         Flight::route('GET /store/@slug/products/@uid', fn ($slug, $uid) => $this->productPage((string) $slug, (string) $uid));
         Flight::route('GET /store/@slug/categories', fn ($slug) => $this->categoriesPage((string) $slug));
         Flight::route('GET /store/@slug/cart', fn ($slug) => $this->cartPage((string) $slug));
         Flight::route('GET /store/@slug/checkout', fn ($slug) => $this->checkoutPage((string) $slug));
+        Flight::route('POST /api/storefront/@slug/checkout/customer', fn ($slug) => $this->checkoutCustomer((string) $slug));
         Flight::route('POST /api/storefront/@slug/checkout', fn ($slug) => $this->createCheckout((string) $slug));
         Flight::route('GET /store/@slug/orders/@uid', fn ($slug, $uid) => $this->orderPage((string) $slug, (string) $uid));
         Flight::route('GET /store/@slug/invoices', fn ($slug) => $this->invoiceSearch((string) $slug));
@@ -67,6 +70,20 @@ final class StorefrontController
         Flight::route('POST /projects/@uid/storefront/payments', fn ($uid) => $this->savePayments((string) $uid));
     }
 
+    private function seoSitemap(string $slug): void
+    {
+        try {
+            $store = $this->storefronts->findBySlug($slug);
+            $products = (($store['seo_index'] ?? '1') === '1' && ($store['seo_sitemap'] ?? '1') === '1')
+                ? $this->storefronts->catalog($store)['products'] : [];
+            header('Content-Type: application/xml; charset=UTF-8');
+            header('Cache-Control: public, max-age=60');
+            echo \App\Services\StorefrontSeoService::sitemap($store, $products);
+        } catch (\Throwable) {
+            $this->notFound('Tienda no disponible.');
+        }
+    }
+
     private function home(string $slug): void
     {
         try {
@@ -77,7 +94,8 @@ final class StorefrontController
             $allCatalog = ($search !== '' || $category !== '')
                 ? $this->storefronts->catalog($store)
                 : $catalog;
-            header('Cache-Control: public, max-age=60, stale-while-revalidate=300');
+            // scheduled-campaign-cache: do not serve a campaign after its end time.
+            header(!empty($store['web_editor']['campaigns']) ? 'Cache-Control: no-store' : 'Cache-Control: public, max-age=60, stale-while-revalidate=300');
             $this->renderPublic('storefront', compact('store', 'catalog', 'allCatalog', 'search', 'category'));
         } catch (\Throwable $e) {
             $this->notFound($e->getMessage());
@@ -222,14 +240,10 @@ final class StorefrontController
                 return;
             }
             $checkoutCustomer = $this->checkoutCustomerForStore($store);
-            if ($checkoutCustomer === null) {
-                $_SESSION['storefront_customer_next'][$store['uid']] = '/store/' . rawurlencode($store['slug']) . '/checkout';
-                Flight::redirect('/store/' . rawurlencode($store['slug']) . '/invoices');
-                return;
-            }
+            $checkoutPending = $checkoutCustomer === null && $this->pendingCustomerForStore($store) !== null;
             $paymentMethods = $this->commerce->publicMethods($store);
             header('Cache-Control: private, no-store');
-            $this->renderPublic('storefront-checkout', compact('store', 'paymentMethods', 'checkoutCustomer'));
+            $this->renderPublic('storefront-checkout', compact('store', 'paymentMethods', 'checkoutCustomer', 'checkoutPending'));
         } catch (\Throwable $e) {
             $this->notFound($e->getMessage());
         }

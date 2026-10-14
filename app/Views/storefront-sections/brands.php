@@ -1,0 +1,1 @@
+<?php if(!$isFiltered && ($store['show_brands']??1) && $brands): ?><section class="brand-section"><div class="container brand-row"><strong>Compra por marca</strong><?php foreach($brands as $brand): ?><a class="brand-pill" href="/store/<?= e($store['slug']) ?>/categories?brand=<?= rawurlencode($brand) ?>"><?= e($brand) ?></a><?php endforeach; ?></div></section><?php endif; ?>

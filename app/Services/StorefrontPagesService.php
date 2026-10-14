@@ -24,7 +24,8 @@ final class StorefrontPagesService
         $content = json_decode((string) ($store['page_content'] ?? '{}'), true);
         $content = is_array($content) ? $content : [];
         foreach (self::fields() as $field) $store[$field] = is_string($content[$field] ?? null) ? $content[$field] : '';
-        return $store;
+        $store['web_editor'] = StorefrontEditorService::normalize($content['web_editor'] ?? []);
+        return array_replace($store, StorefrontSeoService::normalize($content));
     }
     public static function encode(array $input, array $store): string
     {
@@ -37,6 +38,8 @@ final class StorefrontPagesService
             if ($field === 'map_embed_url') $value = self::mapUrl($value);
             $content[$field] = $value;
         }
+        $content['web_editor'] = StorefrontEditorService::normalize($input['web_editor'] ?? $store['web_editor'] ?? []);
+        $content = array_replace($content, StorefrontSeoService::normalize($input, $store));
         return json_encode($content, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 

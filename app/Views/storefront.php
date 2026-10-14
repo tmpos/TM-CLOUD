@@ -13,10 +13,7 @@ foreach ($allProducts as $product) {
     }
 }
 $brands = array_values(array_filter($navigationCatalog['brands'] ?? []));
-$featuredProducts = array_slice(array_values(array_filter(
-    $allProducts,
-    static fn (array $product): bool => (bool) ($product['available'] ?? false)
-)), 0, 8);
+$featuredProducts = \App\Services\StorefrontEditorService::featured($store, $allProducts);
 $newProducts = array_slice($allProducts, 0, 8);
 $isFiltered = $search !== '' || $category !== '';
 $businessType = (string) ($store['resolved_business_type'] ?? 'general');
@@ -66,9 +63,10 @@ if (in_array($heroMode, ['image', 'carousel'], true) && !$heroImages) $heroMode 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="<?= e($heroText) ?>">
+
 <meta name="theme-color" content="<?= e($store['primary_color']) ?>">
-<title><?= e($store['store_name']) ?> | Tienda en línea</title>
+
+<?php echo \App\Services\StorefrontSeoService::head($store, 'home', [], !empty($_GET)); ?>
 <style>
 :root{--brand:<?= e($store['primary_color']) ?>;--accent:<?= e($store['accent_color']) ?>;--ink:<?= e($store['text_color']) ?>;--muted:<?= e($store['muted_color']) ?>;--line:color-mix(in srgb,var(--ink) 12%,transparent);--soft:<?= e($store['surface_color']) ?>;--white:<?= e($store['background_color']) ?>;--header:<?= e($store['header_color']) ?>;--footer:<?= e($store['footer_color']) ?>;--radius:<?= (int)$store['border_radius'] ?>px;--shadow:0 18px 50px color-mix(in srgb,var(--ink) 9%,transparent)}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:var(--white);font:15px/1.55 <?= match($store['font_family']){'serif'=>'Georgia,Cambria,serif','system'=>'ui-sans-serif,system-ui,sans-serif','poppins'=>'Poppins,Inter,system-ui,sans-serif',default=>'Inter,ui-sans-serif,system-ui,sans-serif'} ?>}button,input{font:inherit}a{color:inherit;text-decoration:none}.container{width:min(1180px,calc(100% - 32px));margin:auto}
@@ -90,7 +88,7 @@ if (in_array($heroMode, ['image', 'carousel'], true) && !$heroImages) $heroMode 
 .store-nav-inner .nav-booking{margin-left:auto;background:var(--brand);color:#fff;padding:10px 18px;border-radius:10px;white-space:nowrap}.store-nav-inner .nav-booking + .nav-contact{margin-left:0}.mobile-booking{display:none}@media(max-width:700px){.mobile-booking{display:block;text-align:center;padding:13px;background:var(--brand);color:white;font-weight:800}}
 </style>
 <?php require __DIR__ . '/storefront-catalog-mode.php'; ?>
-</head>
+<?php require __DIR__ . '/storefront-editor-head.php'; ?></head>
 <body class="business-<?= e($businessType) ?> hero-style-<?= e($store['hero_style']) ?> card-style-<?= e($store['card_style']) ?>">
 <div class="topbar"><div class="container"><span><?= e($store['announcement_enabled'] && $store['announcement_text'] ? $store['announcement_text'] : $store['tagline']) ?></span><span><?= e($store['phone'] ?: $store['email']) ?></span></div></div>
 <header class="header"><div class="container header-inner">
@@ -98,63 +96,19 @@ if (in_array($heroMode, ['image', 'carousel'], true) && !$heroImages) $heroMode 
     <form class="search" method="get"><input name="q" value="<?= e($search) ?>" list="store-search-options" placeholder="Buscar productos, marcas o categorías..." aria-label="Buscar productos"><button aria-label="Buscar">⌕</button></form>
     <datalist id="store-search-options"><?php foreach(array_slice($allProducts,0,30) as $product): ?><option value="<?= e($product['name']) ?>"><?php endforeach; ?><?php foreach($navigationCatalog['categories'] as $item): ?><option value="<?= e($item) ?>"><?php endforeach; ?></datalist>
     <div class="header-actions"><button class="icon-action" type="button" data-wishlist-open aria-label="Favoritos">♡<span data-wishlist-count>0</span></button><a class="link-btn" href="/store/<?= e($store['slug']) ?>/invoices">◉ <span>Portal de clientes</span></a><button class="cart-btn" type="button" data-cart-open>Carrito <span class="cart-count" data-cart-count>0</span></button></div>
-</div><nav class="store-nav" aria-label="Navegación principal"><div class="container store-nav-inner"><div class="mega-wrap" data-mega><button class="mega-trigger" type="button" data-mega-trigger>☰ <?= $isRestaurant?'Nuestro menú':'Categorías' ?></button><div class="mega-panel"><div class="mega-list"><a href="/store/<?= e($store['slug']) ?>/categories"><strong><?= $isRestaurant?'Ver todo el menú':'Todos los productos' ?></strong><small><?= count($allProducts) ?></small></a><?php foreach($navigationCatalog['categories'] as $item): ?><a href="/store/<?= e($store['slug']) ?>/categories?category=<?= rawurlencode($item) ?>"><strong><?= e($item) ?></strong><small><?= (int)($categoryCounts[mb_strtolower($item)]??0) ?></small></a><?php endforeach; ?></div><div class="mega-promo"><small><?= $isRestaurant?'Ordena en línea':'Compra en línea' ?></small><b><?= $isRestaurant?'Tu comida favorita, lista para recoger o recibir':'Inventario actualizado y atención directa' ?></b></div></div></div><a href="/store/<?= e($store['slug']) ?>">Inicio</a><a href="/store/<?= e($store['slug']) ?>/pages/contacto">Contacto</a><a href="/store/<?= e($store['slug']) ?>/categories"><?= $isRestaurant?'Menú completo':'Todos los productos' ?></a><?php foreach(array_slice($navigationCatalog['categories'],0,4) as $item): ?><a href="/store/<?= e($store['slug']) ?>/categories?category=<?= rawurlencode($item) ?>"><?= e($item) ?></a><?php endforeach; ?><?php if(!empty($store['is_spa'])): ?><a class="nav-booking" href="/store/<?= e($store['slug']) ?>/pages/contacto#registro">Reservar cita</a><?php endif; ?><?php if($whatsapp): ?><a class="nav-contact" href="https://wa.me/<?= e($whatsapp) ?>" target="_blank" rel="noopener"><?php require __DIR__ . '/storefront-whatsapp-icon.php'; ?> Ayuda por WhatsApp</a><?php endif; ?></div></nav></header><?php if(!empty($store['is_spa'])): ?><a class="mobile-booking" href="/store/<?= e($store['slug']) ?>/pages/contacto#registro">Reservar cita</a><?php endif; ?><?php if(!(int)($store['show_prices']??1)): ?><div class="store-catalog-notice">Consulta precios y pedidos directamente con el negocio. <?php if(!empty($store['whatsapp'])): ?><a href="https://wa.me/<?= e(preg_replace('/\D+/', '', $store['whatsapp'])) ?>" target="_blank" rel="noopener"><?php require __DIR__ . '/storefront-whatsapp-icon.php'; ?> Consultar por WhatsApp</a><?php elseif(!empty($store['phone'])): ?><a href="tel:<?= e(preg_replace('/[^+0-9]/', '', $store['phone'])) ?>">Llamar a la tienda</a><?php endif; ?></div><?php endif; ?>
-<?php if($navigationCatalog['categories']): ?>
-<section class="category-showcase category-showcase-header" aria-labelledby="category-title"><div class="container">
-    <div class="category-showcase-head"><h2 id="category-title"><?= $isRestaurant?'Explora nuestro menú':'Explora por categoría' ?></h2><a href="/store/<?= e($store['slug']) ?>/categories"><?= $isRestaurant?'Ver el menú completo':'Ver todas las categorías' ?> →</a></div>
-    <nav class="category-cards" aria-label="Categorías de productos">
-        <?php foreach($navigationCatalog['categories'] as $item): ?>
-        <a class="category-card <?= mb_strtolower($category)===mb_strtolower($item)?'active':'' ?>" href="/store/<?= e($store['slug']) ?>/categories?category=<?= rawurlencode($item) ?>">
-            <span class="category-icon"><?= e(mb_strtoupper(mb_substr($item,0,1))) ?></span>
-            <span class="category-copy"><strong><?= e($item) ?></strong><small>Ver productos →</small></span>
-        </a>
-        <?php endforeach; ?>
-    </nav>
-</div></section>
-<?php endif; ?>
+</div><?php echo \App\Services\StorefrontEditorService::navigation($store); ?></header><?php if(!empty($store['is_spa'])): ?><a class="mobile-booking" href="/store/<?= e($store['slug']) ?>/pages/contacto#registro">Reservar cita</a><?php endif; ?><?php if(!(int)($store['show_prices']??1)): ?><div class="store-catalog-notice">Consulta precios y pedidos directamente con el negocio. <?php if(!empty($store['whatsapp'])): ?><a href="https://wa.me/<?= e(preg_replace('/\D+/', '', $store['whatsapp'])) ?>" target="_blank" rel="noopener"><?php require __DIR__ . '/storefront-whatsapp-icon.php'; ?> Consultar por WhatsApp</a><?php elseif(!empty($store['phone'])): ?><a href="tel:<?= e(preg_replace('/[^+0-9]/', '', $store['phone'])) ?>">Llamar a la tienda</a><?php endif; ?></div><?php endif; ?>
 <main>
-<?php if(!$isFiltered): ?><section class="hero hero-bg-<?= e($heroMode) ?>" data-hero-carousel style="--hero-color:<?= e($store['hero_background_color']??'#0b1324') ?>;--hero-overlay:<?= number_format(((int)($store['hero_overlay_opacity']??55))/100,2,'.','') ?>">
-<?php if(in_array($heroMode,['image','carousel'],true)): ?><div class="hero-media" aria-hidden="true"><?php foreach(($heroMode==='image'?array_slice($heroImages,0,1):$heroImages) as $index=>$image): ?><div class="hero-slide <?= $index===0?'active':'' ?>" data-hero-slide style="background-image:url('<?= e($image) ?>')"></div><?php endforeach; ?></div><div class="hero-overlay"></div><?php endif; ?>
-<div class="container hero-inner"><div>
-    <span class="eyebrow"><?= $isRestaurant?'Sabor y calidad':'Tienda oficial' ?></span><h1><?= e($heroTitle) ?></h1><p><?= e($heroText) ?></p>
-    <div class="hero-actions"><a class="primary" href="#productos"><?= $isRestaurant?'Ver menú':'Ver productos' ?></a><a class="secondary" href="/store/<?= e($store['slug']) ?>/invoices">Mi cuenta</a></div>
-    <div class="hero-metrics"><div class="hero-metric"><strong><?= count($allProducts) ?></strong><span>Productos publicados</span></div><div class="hero-metric"><strong><?= $availableProducts ?></strong><span>Disponibles ahora</span></div><div class="hero-metric"><strong><?= count($navigationCatalog['categories']) ?></strong><span>Categorías para explorar</span></div></div>
-</div><aside class="hero-card"><strong>Compra con confianza</strong><span>Inventario sincronizado directamente con nuestra tienda.</span><div class="hero-card-grid"><div class="benefit"><b>Disponibilidad</b><small>Existencias actualizadas</small></div><div class="benefit"><b>Atención</b><small>Ayuda personalizada</small></div><div class="benefit"><b>Factura</b><small>Consulta en línea</small></div><div class="benefit"><b>Seguridad</b><small>Datos protegidos</small></div></div></aside></div><?php if($heroMode==='carousel'&&count($heroImages)>1): ?><div class="hero-carousel-dots"><?php foreach($heroImages as $index=>$image): ?><button class="hero-dot <?= $index===0?'active':'' ?>" type="button" data-hero-dot="<?= $index ?>" aria-label="Mostrar imagen <?= $index+1 ?>"></button><?php endforeach; ?></div><?php endif; ?></section>
-<?php else: ?><section class="filtered-hero"><div class="container"><h1><?= $search !== '' ? 'Resultados para “'.e($search).'”' : e($category) ?></h1><p><?= count($products) ?> producto<?= count($products)===1?'':'s' ?> encontrado<?= count($products)===1?'':'s' ?>. Usa los filtros para afinar tu búsqueda.</p></div></section><?php endif; ?>
-<?php if($navigationCatalog['categories']): ?>
-<section class="category-showcase" aria-labelledby="product-category-title"><div class="container">
-    <div class="category-showcase-head"><h2 id="product-category-title"><?= $isRestaurant?'Elige una categoría del menú':'Explora por categoría' ?></h2><a href="/store/<?= e($store['slug']) ?>/categories"><?= $isRestaurant?'Ver el menú completo':'Ver todas las categorías' ?> →</a></div>
-    <nav class="category-cards" aria-label="Categorías de productos">
-        <?php foreach($navigationCatalog['categories'] as $item): ?>
-        <a class="category-card <?= mb_strtolower($category)===mb_strtolower($item)?'active':'' ?>" href="/store/<?= e($store['slug']) ?>/categories?category=<?= rawurlencode($item) ?>">
-            <span class="category-icon"><?= e(mb_strtoupper(mb_substr($item,0,1))) ?></span>
-            <span class="category-copy"><strong><?= e($item) ?></strong><small>Ver productos →</small></span>
-        </a>
-        <?php endforeach; ?>
-    </nav>
-</div></section>
-<?php endif; ?>
-<section class="trust-strip" aria-label="Beneficios de compra"><div class="container trust-grid">
-    <div class="trust-item"><span class="trust-icon">✓</span><span><strong>Inventario sincronizado</strong><small>Disponibilidad actualizada desde la tienda</small></span></div>
-    <div class="trust-item"><span class="trust-icon">▣</span><span><strong>Factura digital</strong><small>Consulta y descarga cuando la necesites</small></span></div>
-    <div class="trust-item"><span class="trust-icon"><?= $store['delivery_enabled'] || $store['shipping_enabled'] ? '↗' : '⌂' ?></span><span><strong><?= $store['delivery_enabled'] || $store['shipping_enabled'] ? 'Opciones de entrega' : 'Retiro en tienda' ?></strong><small><?= $store['shipping_enabled'] ? 'Envíos configurados por el comercio' : ($store['delivery_enabled'] ? 'Entrega local disponible' : 'Compra en línea y recoge en tienda') ?></small></span></div>
-    <div class="trust-item"><span class="trust-icon">◎</span><span><strong>Atención personalizada</strong><small>Asistencia antes y después de comprar</small></span></div>
-</div></section>
-<?php if(!$isFiltered && ($store['show_featured']??1) && $featuredProducts): ?><section class="home-section"><div class="container"><div class="section-head"><div><span class="category">Selección de la tienda</span><h2>Productos destacados</h2><p>Opciones disponibles para comprar ahora.</p></div><a class="view-product" href="/store/<?= e($store['slug']) ?>/categories">Ver catálogo completo →</a></div><div class="home-carousel"><?php foreach($featuredProducts as $product) $renderProductCard($product,$store['slug'],$symbol); ?></div></div></section><?php endif; ?>
-<?php if(!$isFiltered && ($store['promo_enabled']??1)): $promoLink=trim((string)($store['promo_link']??'')) ?: '/store/'.$store['slug'].'/categories'; ?><section class="promo-band"><div class="container"><article class="promo-card"><?php if($store['promo_image']??''): ?><div class="promo-image" style="background-image:url('<?= e($store['promo_image']) ?>')"></div><?php endif; ?><div class="promo-copy"><small>Recomendación especial</small><h2><?= e($store['promo_title'] ?: 'Encuentra el equipo ideal para ti') ?></h2><p><?= e($store['promo_text'] ?: 'Productos seleccionados, inventario actualizado y atención personalizada.') ?></p><a href="<?= e($promoLink) ?>">Descubrir productos →</a></div></article></div></section><?php endif; ?>
-<?php if(!$isFiltered && ($store['show_brands']??1) && $brands): ?><section class="brand-section"><div class="container brand-row"><strong>Compra por marca</strong><?php foreach($brands as $brand): ?><a class="brand-pill" href="/store/<?= e($store['slug']) ?>/categories?brand=<?= rawurlencode($brand) ?>"><?= e($brand) ?></a><?php endforeach; ?></div></section><?php endif; ?>
-<section class="catalog" id="productos"><div class="container">
-    <div class="section-head"><div><h2><?= $isFiltered?'Resultados de búsqueda':($isRestaurant?'Nuestro menú':'Todos nuestros productos') ?></h2><p><?= count($products) ?> <?= $isRestaurant?'opción':'producto' ?><?= count($products) === 1 ? '' : 'es' ?> disponible<?= count($products) === 1 ? '' : 's' ?></p></div><?php if($search || $category): ?><a href="/store/<?= e($store['slug']) ?>#productos">Limpiar filtros</a><?php else: ?><a href="/store/<?= e($store['slug']) ?>/categories"><?= $isRestaurant?'Explorar menú':'Filtros avanzados' ?> →</a><?php endif; ?></div>
-    <?php if($navigationCatalog['categories']): ?><nav class="chips" aria-label="Categorías"><a class="chip <?= $category===''?'active':'' ?>" href="?q=<?= rawurlencode($search) ?>#productos">Todos</a><?php foreach($navigationCatalog['categories'] as $item): ?><a class="chip <?= mb_strtolower($category)===mb_strtolower($item)?'active':'' ?>" href="?category=<?= rawurlencode($item) ?>&q=<?= rawurlencode($search) ?>#productos"><?= e($item) ?></a><?php endforeach; ?></nav><?php endif; ?>
-    <div class="product-grid"><?php foreach($products as $product) $renderProductCard($product,$store['slug'],$symbol); ?><?php if(!$products): ?><div class="empty"><h3><?= $catalog['table'] ? 'No encontramos productos' : 'Catálogo en preparación' ?></h3><p><?= $catalog['table'] ? 'Prueba con otra búsqueda o categoría.' : 'La tienda está activa y pronto publicará su inventario.' ?></p></div><?php endif; ?></div>
-</div></section>
-<?php if(!$isFiltered && ($store['show_new_arrivals']??1) && $newProducts): ?><section class="home-section soft"><div class="container"><div class="section-head"><div><span class="category">Novedades</span><h2>Recién agregados</h2><p>Los últimos productos publicados en el inventario.</p></div></div><div class="home-carousel"><?php foreach($newProducts as $product) $renderProductCard($product,$store['slug'],$symbol); ?></div></div></section><?php endif; ?>
-<section class="commerce"><div class="container"><div class="commerce-head"><span>Una compra más sencilla</span><h2>Todo lo necesario para comprar con confianza</h2><p>Consulta el inventario real, revisa los detalles y completa tu pedido desde cualquier dispositivo.</p></div><div class="commerce-grid">
-    <article class="commerce-card"><i>⌕</i><h3>Encuentra lo que buscas</h3><p>Explora por categorías, utiliza filtros de precio y disponibilidad o busca directamente por nombre.</p></article>
-    <article class="commerce-card"><i>▤</i><h3>Tus documentos en línea</h3><p>Consulta tus facturas de forma privada y descarga la versión actualizada cuando la necesites.</p></article>
-    <article class="commerce-card"><i>✓</i><h3>Pedido claro y seguro</h3><p>El precio y la existencia se vuelven a validar en el servidor antes de confirmar el pedido.</p></article>
-</div></div></section>
-<section class="support-cta"><div class="container"><div class="support-box"><div><h2>¿Necesitas ayuda para elegir?</h2><p>Nuestro equipo puede orientarte sobre disponibilidad, entrega y detalles del producto.</p></div><div class="support-actions"><?php if($whatsapp): ?><a class="support-main" href="https://wa.me/<?= e($whatsapp) ?>" target="_blank" rel="noopener"><?php require __DIR__ . '/storefront-whatsapp-icon.php'; ?> Hablar por WhatsApp</a><?php endif; ?><?php if($store['phone']): ?><a class="support-alt" href="tel:<?= e(preg_replace('/[^\d+]/','',(string)$store['phone'])) ?>">Llamar a la tienda</a><?php endif; ?><a class="<?= $whatsapp || $store['phone'] ? 'support-alt' : 'support-main' ?>" href="/store/<?= e($store['slug']) ?>/categories">Explorar catálogo</a></div></div></div></section>
+<?php // website-section-loop: template paths come exclusively from server constants.
+// website-custom-builder
+if (!$isFiltered && in_array(($store['web_editor']['design']['preset'] ?? ''), ['custom','landing','restaurant','gym','spa'], true)) { require __DIR__ . '/storefront-builder.php'; } else {
+$websiteSections = $isFiltered ? [['id'=>'hero','visible'=>true],['id'=>'catalog','visible'=>true]] : $store['web_editor']['sections'];
+foreach ($websiteSections as $websiteSection):
+    if (!$websiteSection['visible'] || !in_array($websiteSection['id'], \App\Services\StorefrontEditorService::SECTIONS, true)) continue;
+    echo '<div data-website-section="' . e($websiteSection['id']) . '">';
+    if ($websiteSection['id'] === 'campaigns') require __DIR__ . '/storefront-campaigns.php';
+    else require __DIR__ . '/storefront-sections/' . $websiteSection['id'] . '.php';
+    echo '</div>';
+endforeach; } ?>
 </main>
 <footer class="footer"><div class="container"><div class="footer-grid">
     <div><div class="footer-brand"><span class="brand-logo"><?php if($store['logo_url']): ?><img src="<?= e($store['logo_url']) ?>" alt=""><?php else: ?><?= e(mb_strtoupper(mb_substr($store['store_name'],0,1))) ?><?php endif; ?></span><h3><?= e($store['store_name']) ?></h3></div><p><?= e($store['tagline']) ?></p><p class="footer-note">Catálogo e inventario sincronizados con nuestro sistema de tienda.</p><div class="footer-social"><?php if($store['instagram_url']): ?><a href="<?= e($store['instagram_url']) ?>" target="_blank" rel="noopener" aria-label="Instagram">IG</a><?php endif; ?><?php if($store['facebook_url']): ?><a href="<?= e($store['facebook_url']) ?>" target="_blank" rel="noopener" aria-label="Facebook">FB</a><?php endif; ?></div></div>
@@ -190,7 +144,7 @@ document.querySelector('[data-quick-add]')?.addEventListener('click',()=>quickPr
 sync();
 })();
 </script>
-<?php if($heroMode==='carousel'&&count($heroImages)>1): ?><script>(()=>{const hero=document.querySelector('[data-hero-carousel]'),slides=[...hero.querySelectorAll('[data-hero-slide]')],dots=[...hero.querySelectorAll('[data-hero-dot]')],delay=<?= (int)($store['hero_carousel_interval']??6000) ?>;let index=0,timer;function show(next){index=(next+slides.length)%slides.length;slides.forEach((slide,i)=>slide.classList.toggle('active',i===index));dots.forEach((dot,i)=>dot.classList.toggle('active',i===index))}function start(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;clearInterval(timer);timer=setInterval(()=>show(index+1),delay)}dots.forEach((dot,i)=>dot.onclick=()=>{show(i);start()});hero.addEventListener('mouseenter',()=>clearInterval(timer));hero.addEventListener('mouseleave',start);document.addEventListener('visibilitychange',()=>document.hidden?clearInterval(timer):start());start()})();</script><?php endif; ?>
+<?php if($heroMode==='carousel'&&count($heroImages)>1): ?><script>(()=>{const hero=document.querySelector('[data-hero-carousel]');if(!hero)return;const slides=[...hero.querySelectorAll('[data-hero-slide]')],dots=[...hero.querySelectorAll('[data-hero-dot]')],delay=<?= (int)($store['hero_carousel_interval']??6000) ?>;let index=0,timer;function show(next){index=(next+slides.length)%slides.length;slides.forEach((slide,i)=>slide.classList.toggle('active',i===index));dots.forEach((dot,i)=>dot.classList.toggle('active',i===index))}function start(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;clearInterval(timer);timer=setInterval(()=>show(index+1),delay)}dots.forEach((dot,i)=>dot.onclick=()=>{show(i);start()});hero.addEventListener('mouseenter',()=>clearInterval(timer));hero.addEventListener('mouseleave',start);document.addEventListener('visibilitychange',()=>document.hidden?clearInterval(timer):start());start()})();</script><?php endif; ?>
 <style>
 .store-back-top{position:fixed;right:22px;bottom:92px;z-index:25;display:flex;align-items:center;gap:8px;min-height:46px;padding:0 16px;border:1px solid #ffffff50;border-radius:999px;background:var(--brand);color:#fff;font-family:inherit;font-size:14px;font-weight:700;box-shadow:0 4px 18px #0003;cursor:pointer}
 .store-back-top[hidden]{display:none}.store-back-top:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
@@ -211,5 +165,5 @@ sync();
 })();
 </script>
 <?php require __DIR__ . '/storefront-contact-actions.php'; ?>
-</body>
+<?php $websiteAnalyticsPath = ''; require __DIR__ . '/storefront-analytics.php'; ?></body>
 </html>

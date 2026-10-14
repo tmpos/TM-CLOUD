@@ -342,7 +342,7 @@ final class ApiController
                 try {
                     $input = Http::input();
                     $project = $this->licensedProject($input, 'license-website-' . $operation);
-                    $result = $this->runtime->handle($project, 'invoke', ['channel' => $operation === 'save' ? 'web:guardarConfiguracion' : 'web:obtenerConfiguracion', 'args' => [$input]], []);
+                    $result = $this->runtime->handle($project, 'invoke', ['channel' => $operation === 'save' ? 'web:guardarConfiguracion' : 'web:obtenerConfiguracion', 'args' => [$input]], ['authentication' => 'licensed-website']);
                     Flight::json(['data' => $result['data']]);
                 } catch (\Throwable $e) {
                     $status = in_array($e->getCode(), [401, 403, 404, 409, 423, 429], true) ? $e->getCode() : 422;

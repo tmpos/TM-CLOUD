@@ -64,7 +64,26 @@ final class StorefrontService
         return $store;
     }
 
-    public function update(string $projectUid, array $input): array
+    public function publicLinks(array $store): array
+    {
+        $default = rtrim((string) $this->config['url'], '/') . '/store/' . rawurlencode($store['slug']);
+        $custom = ''; $status = 'none';
+        if ($this->db->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_domains'")->fetchColumn()) {
+            $q = $this->db->prepare("SELECT hostname,status,tls_ok FROM project_domains WHERE project_uid=? AND destination='store' LIMIT 1");
+            $q->execute([$store['project_uid']]); $domain = $q->fetch(\PDO::FETCH_ASSOC);
+            if ($domain) {
+                $status = $domain['status'];
+                if ($status === 'active' && (int)$domain['tls_ok'] === 1) $custom = 'https://' . ProjectDomainService::hostname($domain['hostname']);
+                elseif ($status === 'active') $status = 'pending_https';
+            }
+        }
+        return ['public_url'=>$custom ?: $default,'default_url'=>$default,'custom_url'=>$custom,'domain_status'=>$status,
+            'page_base'=>$custom !== '' ? $custom . '/store/' . rawurlencode($store['slug']) : $default];
+    }
+
+    public function editorStore(): StorefrontEditorStore { return new StorefrontEditorStore($this->db); }
+
+    public function update(string $projectUid, array $input, bool $preview = false): array
     {
         $store = $this->findForProject($projectUid);
         $slug = Support::slug((string) ($input['slug'] ?? $store['slug']));
@@ -152,6 +171,11 @@ final class StorefrontService
             'warehouse_uid' => $catalogSettings['warehouse_uid'],
             'updated_at' => Support::now(),
         ];
+        if ($preview) {
+            $prepared = $this->withPresentation($this->withCompanyIdentity(array_replace($store, $fields)));
+            $prepared['url'] = rtrim((string) $this->config['url'], '/') . '/store/' . $prepared['slug'];
+            return $prepared;
+        }
         $assignments = implode(',', array_map(static fn (string $field): string => "$field=:$field", array_keys($fields)));
         $fields['project_uid'] = $projectUid;
         try {
@@ -262,6 +286,7 @@ final class StorefrontService
 
     private function publicProduct(array $product, array $store, bool $internal): array
     {
+        if (!$internal) $product = StorefrontEditorService::applyProduct($product, $store, fn ($value) => $this->publicImage($store['project_uid'], $value));
         if (!$internal && !(int) ($store['show_prices'] ?? 1)) {
             $product['price'] = null;
             $product['compare_price'] = null;
@@ -308,6 +333,7 @@ final class StorefrontService
                 if ($product['brand'] !== '') {
                     $brands[mb_strtolower($product['brand'])] = $product['brand'];
                 }
+                if (!$internal) $product = StorefrontEditorService::applyProduct($product, $store, fn ($value) => $this->publicImage($store['project_uid'], $value));
                 $haystack = mb_strtolower($product['name'] . ' ' . $product['description'] . ' ' . $product['category'] . ' ' . $product['brand']);
                 if ($needle !== '' && !str_contains($haystack, $needle)) {
                     continue;

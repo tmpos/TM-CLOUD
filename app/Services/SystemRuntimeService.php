@@ -61,7 +61,7 @@ final class SystemRuntimeService
         if ($action !== 'invoke') return false;
         $channel = (string) ($input['channel'] ?? '');
         if (str_starts_with($channel, 'db:get') || in_array($channel, [
-            'config:get', 'auth:login', 'caja:getTurnoActivo', 'caja:getTurnoAbierto',
+            'fiscalHN:estado', 'farmacia:obtenerEstado', 'salon:listarAnticipos', 'config:get', 'auth:login', 'caja:getTurnoActivo', 'caja:getTurnoAbierto',
             'facturas:obtenerFirma', 'web:listarPedidos', 'web:detallePedido', 'clientes:obtenerFormulario', 'documentos:obtenerDiseno', 'documentos:estadoFirmaRepresentante',
             'spa:obtenerHorarios', 'spa:obtenerLanding', 'spa:disponibilidad', 'spa:listarCitas', 'web:obtenerConfiguracion',
             'cuadre:listar', 'cuadre:ventasTurno', 'cuadre:gastosTurno', 'app:getName',
@@ -91,7 +91,7 @@ final class SystemRuntimeService
             'db/bitacoraList' => $this->bitacora($db, (int) ($input['limite'] ?? 1000)),
             'db/bitacoraDeleteAll' => $this->clearBitacora($db),
             'config/get' => $this->configGet($db, (string) ($input['clave'] ?? '')),
-            'config/set' => $this->configSet($db, $input),
+            'config/set' => $this->configSet($db, $input, $actor),
             'invoke' => $this->invoke($db, $project, (string) ($input['channel'] ?? ''), (array) ($input['args'] ?? []), $actor),
             default => throw new RuntimeException('Accion del sistema no disponible.', 404),
         };
@@ -142,6 +142,7 @@ final class SystemRuntimeService
         $tableName = (string) ($input['tabla'] ?? '');
         $table = $this->table($db, $tableName);
         $this->ensureAccessoryCommissionColumns($db, $tableName);
+        PharmacyRuntimeService::guardInsert($db, $tableName, (array) ($input['data'] ?? []));
         $data = $this->cleanData($db, $tableName, (array) ($input['data'] ?? []), true);
         $now = $this->now();
         if ($this->hasColumn($db, $tableName, 'uid') && empty($data['uid'])) $data['uid'] = Support::uid('rec_');
@@ -296,6 +297,34 @@ final class SystemRuntimeService
 
     private function invoke(PDO $db, array $project, string $channel, array $args, array $actor): mixed
     {
+        if ($channel === 'holds:operar') {
+            require_once __DIR__ . '/HoldRuntimeService.php';
+            return HoldRuntimeService::handle($db, (array)($args[0] ?? []), $actor, $this->canConfigureSystem($actor));
+        }
+        if (in_array($channel, ['ventas:guardarAtomica', 'fiscalHN:emitir'], true)) {
+            PharmacyRuntimeService::authorizeSale($db, (array)($args[0] ?? []), $actor, $this->canConfigureSystem($actor));
+        }
+        if (str_starts_with($channel, 'fiscalHN:')) {
+            require_once __DIR__ . '/HondurasFiscalService.php';
+            $p = (array) ($args[0] ?? []);
+            if ($channel === 'fiscalHN:estado') return ['success'=>true, 'data'=>HondurasFiscalService::status($db, (string)($p['warehouseUid'] ?? ''))];
+            if ($channel === 'fiscalHN:guardar') {
+                if (!$this->canConfigureSystem($actor)) throw new RuntimeException('Solo Administrador o Soporte puede configurar CAI.', 403);
+                return ['success'=>true, 'data'=>HondurasFiscalService::save($db, (string)($p['warehouseUid'] ?? ''), (array)($p['settings'] ?? []))];
+            }
+            if ($channel === 'fiscalHN:emitir') {
+                if (empty($p['hn_fiscal']) || !empty($p['comprobante_id'])) throw new InvalidArgumentException('Solicitud fiscal Honduras no valida.');
+                HondurasFiscalService::install($db);
+                return $this->guardarVenta($db, $project, $p);
+            }
+            throw new InvalidArgumentException('Operacion fiscal Honduras no disponible.');
+        }
+        if (str_starts_with($channel, 'farmacia:')) {
+            return PharmacyRuntimeService::handle($db, $channel, (array)($args[0] ?? []), $actor, $this->canConfigureSystem($actor));
+        }
+        if (str_starts_with($channel, 'salon:')) {
+            return SalonRuntimeService::handle($db, $channel, (array)($args[0] ?? []), $actor, $this->canConfigureSystem($actor));
+        }
         if ($channel === 'almacen:asignarTodosLosDatos') {
             return $this->assignAllWarehouse($db, (array) ($args[0] ?? []), $actor);
         }
@@ -323,13 +352,14 @@ final class SystemRuntimeService
             return ['success' => true, 'data' => $this->websiteOrders->handle($project, $channel === 'web:listarPedidos' ? 'list' : 'detail', (array) ($args[0] ?? []))];
         }
         if ($channel === 'web:obtenerConfiguracion' || $channel === 'web:guardarConfiguracion') {
+            if (!$this->canConfigureSystem($actor) && ($actor['authentication'] ?? '') !== 'licensed-website') throw new RuntimeException('Solo Administrador o Soporte puede gestionar la página web.', 403);
             if (!$this->website) throw new RuntimeException('Configuración web no disponible.');
             return ['success' => true, 'data' => $this->website->handle($project, $channel === 'web:guardarConfiguracion' ? 'save' : 'get', (array) ($args[0] ?? []))];
         }
         if (in_array($channel, ['gastos:guardarContable','gastos:anularContable','gastos:pagarContable','gastos:revertirPagoContable','gastos:aprobarContable','gastos:consultarContabilidad','gastos:cerrarPeriodo','gastos:reabrirPeriodo','gastos:listarCuentas'], true)) return (new ExpenseAccountingService())->handle($db, $channel, (array) ($args[0] ?? []), $actor);
         if ($channel === 'auth:login') return $this->authLogin($db, (array) ($args[0] ?? []));
         if ($channel === 'config:get') return $this->configGet($db, (string) ($args[0] ?? ''));
-        if ($channel === 'config:set') return $this->configSet($db, ['clave' => $args[0] ?? '', 'valor' => $args[1] ?? '', 'categoria' => $args[2] ?? 'general']);
+        if ($channel === 'config:set') return $this->configSet($db, ['clave' => $args[0] ?? '', 'valor' => $args[1] ?? '', 'categoria' => $args[2] ?? 'general'], $actor);
         $spaOperations = ['spa:obtenerHorarios' => 'get', 'spa:guardarHorarios' => 'save', 'spa:disponibilidad' => 'availability', 'spa:listarCitas' => 'appointments', 'spa:guardarCita' => 'appointment-save', 'spa:eliminarCita' => 'appointment-delete'];
         if (isset($spaOperations[$channel])) return ['success' => true, 'data' => (new SpaScheduleService())->handle($project, $spaOperations[$channel], (array) ($args[0] ?? []), new RecordService($this->schema, $this->logs), $this->webhooks)];
         if ($channel === 'citas:crearEnlaceSpa' && $this->spaAppointments) return ['success' => true, 'data' => $this->spaAppointments->create($project, (array) ($args[0] ?? []), (string) ($actor['email'] ?? $actor['usuario'] ?? 'system'))];
@@ -360,7 +390,11 @@ final class SystemRuntimeService
         if ($channel === 'transferencia:realizar') return $this->transferir($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'ajuste:realizar') return $this->ajustar($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'precio:registrarHistorial') return $this->registrarPrecios($db, $project, (array) ($args[0] ?? []));
-        if ($channel === 'otp-local:getConfig') return $this->otpStatus($db);
+        if (in_array($channel, ['otp-local:getConfig', 'otp-local:saveConfig', 'otp-local:refreshFromCloud'], true)
+            && !$this->canConfigureSystem($actor)) {
+            throw new RuntimeException('Solo Administrador o Soporte puede consultar o configurar el centro OTP.', 403);
+        }
+        if (in_array($channel, ['otp-local:getConfig', 'otp-local:refreshFromCloud'], true)) return $this->otpStatus($db);
         if ($channel === 'otp-local:validate') return ['success' => true, 'data' => ['valid' => (new ProjectOtpService())->validateSupportLogin($db, (string) ($args[0] ?? ''), $this->now())]];
         if ($channel === 'otp-local:saveConfig') return $this->saveOtpConfig($db, (array) ($args[0] ?? []));
         if (in_array($channel, ['facturas:solicitarOtpEliminar', 'telefonos:solicitarOtpEliminar'], true)) return $this->otpStatus($db);
@@ -501,6 +535,22 @@ final class SystemRuntimeService
      *   devices can never read the same sequence value or stock state.
      * - Realtime/webhook events are dispatched only after COMMIT.
      */
+    private function permitsNegativeStock(PDO $db, array $invoice): bool
+    {
+        if (!$this->exists($db, 'configuracion')) return false;
+        $config = $this->configGet($db, 'pos_allow_negative_stock');
+        if (($config['data'] ?? '') !== '1') return false;
+        if ($this->exists($db, 'apariencia_almacen')) {
+            $uid = trim((string) ($invoice['almacen_uid'] ?? ''));
+            $stmt = $db->prepare($uid !== ''
+                ? "SELECT 1 FROM apariencia_almacen WHERE almacen_uid=? AND modo_tienda='farmacia' LIMIT 1"
+                : "SELECT 1 FROM apariencia_almacen WHERE almacen_id=? AND modo_tienda='farmacia' LIMIT 1");
+            $stmt->execute([$uid !== '' ? $uid : (int) ($invoice['almacen_id'] ?? 0)]);
+            if ($stmt->fetchColumn()) return false;
+        }
+        return true;
+    }
+
     private function guardarVenta(PDO $db, array $project, array $payload): array
     {
         $factura = (array) ($payload['factura'] ?? []);
@@ -535,22 +585,43 @@ final class SystemRuntimeService
             $exists->execute([$noFactura]);
             if ($exists->fetchColumn()) throw new RuntimeException("La factura $noFactura ya existe.");
 
+            if (!empty($payload['hn_fiscal'])) {
+                require_once __DIR__ . '/HondurasFiscalService.php';
+                if ($comprobanteId > 0) throw new InvalidArgumentException('Honduras no consume secuencias dominicanas.');
+                $factura = HondurasFiscalService::reserve($db, $factura, (array)$payload['hn_fiscal'], $operationUid);
+            }
             if ($comprobanteId > 0) {
                 $factura['ncf'] = $this->assignSaleNcf($db, $comprobanteId, trim((string) ($factura['ncf'] ?? '')));
             }
 
+            require_once __DIR__ . '/PharmacyRuntimeService.php';
+            $factura = PharmacyRuntimeService::applySale($db, $factura, $payload);
+            $allowNegativeStock = $this->permitsNegativeStock($db, $factura);
             foreach ((array) ($payload['inventario'] ?? []) as $item) {
                 $item = (array) $item;
                 $tableName = (string) ($item['tabla'] ?? '');
                 $itemId = (int) ($item['id'] ?? 0);
-                if (!in_array($tableName, ['imei', 'serial', 'accesorios'], true) || $itemId <= 0) throw new InvalidArgumentException('Producto de inventario no valido.');
+                if (!in_array($tableName, ['imei', 'serial', 'accesorios', 'piezas'], true) || $itemId <= 0) throw new InvalidArgumentException('Producto de inventario no valido.');
                 $table = $this->table($db, $tableName);
-                if ($tableName === 'accesorios') {
+                if (in_array($tableName, ['accesorios', 'piezas'], true)) {
+                    $quantity = (float) ($item['cantidad'] ?? 0);
+                    if (!is_finite($quantity) || $quantity <= 0) throw new InvalidArgumentException('Cantidad de inventario no valida.');
+                    $current = $this->row($db, $table, $itemId);
+                    $warehouseUid = (string) ($factura['almacen_uid'] ?? '');
+                    $rowUid = (string) ($current['almacen_uid'] ?? '');
+                    if (($warehouseUid !== '' && $rowUid !== '' && $warehouseUid !== $rowUid)
+                        || (($warehouseUid === '' || $rowUid === '') && !empty($factura['almacen_id']) && !empty($current['almacen_id']) && (int) $factura['almacen_id'] !== (int) $current['almacen_id'])) {
+                        throw new RuntimeException('El producto pertenece a otro almacen.');
+                    }
                     // La condicion cantidad>=? evita vender mas de lo disponible en
                     // una sola sentencia; el aviso de realtime solo se emite si de
                     // verdad desconto algo (comportamiento previo conservado).
-                    $stmt = $db->prepare("UPDATE $table SET cantidad=cantidad-?, updated_at=? WHERE id=? AND cantidad>=?");
-                    $stmt->execute([(float) ($item['cantidad'] ?? 0), $this->now(), $itemId, (float) ($item['cantidad'] ?? 0)]);
+                    $stockCondition = $allowNegativeStock ? '' : ' AND cantidad>=?';
+                    $stmt = $db->prepare("UPDATE $table SET cantidad=COALESCE(cantidad,0)-?, updated_at=? WHERE id=?" . $stockCondition);
+                    $params = [$quantity, $this->now(), $itemId];
+                    if (!$allowNegativeStock) $params[] = $quantity;
+                    $stmt->execute($params);
+                    if ($stmt->rowCount() !== 1) throw new RuntimeException('Stock insuficiente para completar la venta.');
                     if ($stmt->rowCount() > 0) $events[] = ['record.updated', $tableName, $itemId];
                 } else {
                     $this->sellUniqueItem($db, $tableName, $itemId, (array) ($item['cambios'] ?? []));
@@ -558,6 +629,8 @@ final class SystemRuntimeService
                 }
             }
 
+            require_once __DIR__ . '/SalonRuntimeService.php';
+            $factura = SalonRuntimeService::applyDeposit($db, $factura, $payload);
             $facturaId = $this->insertRaw($db, $project, 'facturas', $factura, false);
             $events[] = ['record.created', 'facturas', $facturaId];
             if (!empty($payload['cuenta_cobrar'])) {
@@ -604,6 +677,8 @@ final class SystemRuntimeService
         return ['success' => true, 'data' => [
             'id' => $facturaId,
             'uid' => $facturaUid,
+            'otro' => (string) ($factura['otro'] ?? ''),
+            'tipo_comprobante' => (string) ($factura['tipo_comprobante'] ?? ''),
             'ncf' => (string) ($factura['ncf'] ?? ''),
             'operation_uid' => $operationUid,
             'duplicate' => false,
@@ -652,6 +727,8 @@ final class SystemRuntimeService
         return ['success' => true, 'duplicate' => true, 'data' => [
             'id' => (int) $existing['id'],
             'uid' => (string) ($existing['uid'] ?? ''),
+            'otro' => (string) ($existing['otro'] ?? ''),
+            'tipo_comprobante' => (string) ($existing['tipo_comprobante'] ?? ''),
             'ncf' => (string) ($existing['ncf'] ?? ''),
             'operation_uid' => $operationUid,
             'duplicate' => true,
@@ -808,8 +885,8 @@ final class SystemRuntimeService
         $turno=$this->turnoActivo($db,$warehouse)['data'];
         if(!$turno)return['success'=>true,'data'=>['total'=>0,'efectivo'=>0,'tarjeta'=>0,'transferencia'=>0,'abonos_cxc'=>0,'cantidad_abonos_cxc'=>0]];
         $where="estado_factura='PAGADA' AND created_at>=?"; $params=[$turno['created_at']]; if($warehouse!==''){$where.=" AND (almacen_uid=? OR COALESCE(almacen_uid,'')='')";$params[]=$warehouse;}
-        $stmt=$db->prepare("SELECT metodo_pago,total,efectivo,tarjeta,transferencia FROM facturas WHERE $where");$stmt->execute($params);$totals=['total'=>0.0,'efectivo'=>0.0,'tarjeta'=>0.0,'transferencia'=>0.0,'abonos_cxc'=>0.0,'cantidad_abonos_cxc'=>0];
-        foreach($stmt->fetchAll()as$row){$method=strtoupper((string)($row['metodo_pago']??''));if(str_contains($method,'CREDITO')||str_contains($method,'CRÉDITO'))continue;$total=(float)($row['total']??0);$cash=(float)($row['efectivo']??0);$card=(float)($row['tarjeta']??0);$transfer=(float)($row['transferencia']??0);if($cash+$card+$transfer==0){if(str_contains($method,'TARJETA'))$card=$total;elseif(str_contains($method,'TRANSFERENCIA'))$transfer=$total;else$cash=$total;}$totals['total']+=$total;$totals['efectivo']+=$cash;$totals['tarjeta']+=$card;$totals['transferencia']+=$transfer;}
+        $stmt=$db->prepare("SELECT metodo_pago,total,efectivo,tarjeta,transferencia,otro FROM facturas WHERE $where");$stmt->execute($params);$totals=['total'=>0.0,'efectivo'=>0.0,'tarjeta'=>0.0,'transferencia'=>0.0,'abonos_cxc'=>0.0,'cantidad_abonos_cxc'=>0];
+        foreach($stmt->fetchAll()as$row){$method=strtoupper((string)($row['metodo_pago']??''));if(str_contains($method,'CREDITO')||str_contains($method,'CRÉDITO'))continue;$total=(float)($row['total']??0);$cash=(float)($row['efectivo']??0);$card=(float)($row['tarjeta']??0);$transfer=(float)($row['transferencia']??0);$salonCashBalance=max(0,$total-max(0,(float)(json_decode((string)($row['otro']??''),true)['salon_deposit']['amount']??0)));if($cash+$card+$transfer==0){if(str_contains($method,'TARJETA'))$card=$salonCashBalance;elseif(str_contains($method,'TRANSFERENCIA'))$transfer=$salonCashBalance;else$cash=$salonCashBalance;}$totals['total']+=$total;$totals['efectivo']+=$cash;$totals['tarjeta']+=$card;$totals['transferencia']+=$transfer;}
         return['success'=>true,'data'=>$totals];
     }
 
@@ -940,11 +1017,15 @@ final class SystemRuntimeService
     }
 
     private function configGet(PDO $db,string $key):array { $stmt=$db->prepare('SELECT valor FROM configuracion WHERE clave=? LIMIT 1');$stmt->execute([$key]);return['success'=>true,'data'=>(string)($stmt->fetchColumn()?:'')]; }
-    private function configSet(PDO $db,array $p):array
+    private function configSet(PDO $db,array $p,array $actor=[]):array
     {
         $key=trim((string)($p['clave']??''));
         if($key==='')throw new InvalidArgumentException('Clave requerida.');
         $value=(string)($p['valor']??'');
+        if ($key === 'pos_allow_negative_stock') {
+            if (!$this->canConfigureSystem($actor)) throw new RuntimeException('Solo Administrador o Soporte puede configurar la venta sin stock.', 403);
+            if (!in_array($value, ['0', '1'], true)) throw new InvalidArgumentException('Opcion de stock no valida.');
+        }
         $category=(string)($p['categoria']??'general');
         $now=$this->now();
         $update=$db->prepare('UPDATE configuracion SET valor=?,categoria=?,updated_at=? WHERE clave=?');

@@ -92,6 +92,7 @@ final class SpaAppointmentService
         if (count($selected) !== 1) throw new InvalidArgumentException('Seleccione un servicio disponible del listado.');
         $servicio = mb_strtoupper(trim($selected[0]['nombre']), 'UTF-8');
         $nota = trim((string) ($input['nota'] ?? ''));
+        if (isset(json_decode($nota, true)['tmpos_salon'])) throw new InvalidArgumentException('La nota contiene una asignacion interna no permitida.');
         if (mb_strlen($nota) > 500) throw new InvalidArgumentException('La nota es demasiado larga.');
 
         if (empty($request['reusable'])) {
@@ -118,7 +119,7 @@ final class SpaAppointmentService
             foreach ($data as $key => $value) {
                 if ($value === '' && !in_array($key, ['nota'], true)) unset($data[$key]);
             }
-            $appointment = $this->records->create($project, 'citas_spa', $data);
+            $appointment = (new SpaBookingCustomerService())->create($project, $data, $this->records, $this->logs, $this->webhooks);
             $now = Support::now();
             if (empty($request['reusable'])) {
                 $this->db->prepare("UPDATE spa_appointment_requests SET status='used',appointment_uid=?,used_at=? WHERE uid=? AND status='processing'")

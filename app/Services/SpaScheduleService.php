@@ -26,6 +26,13 @@ final class SpaScheduleService
     {
         $db = Database::connect($project['database_path']);
         $db->exec('CREATE TABLE IF NOT EXISTS _spa_schedule (id INTEGER PRIMARY KEY CHECK(id=1), settings TEXT NOT NULL)');
+        $guardSql = $db->query("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='spa_capacity_insert'")->fetchColumn();
+        if ($guardSql && !str_contains($guardSql, 'tmpos_salon')) {
+            $db->exec('BEGIN IMMEDIATE');
+            try { $this->installGuards($db); $db->exec('COMMIT'); }
+            catch (\Throwable $error) { $db->exec('ROLLBACK'); throw $error; }
+        }
+        SalonScheduleGuard::install($db);
         return $db;
     }
 
@@ -82,13 +89,28 @@ final class SpaScheduleService
         $db->exec('BEGIN IMMEDIATE');
         try {
             $db->exec("CREATE TABLE IF NOT EXISTS citas_spa (id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT UNIQUE NOT NULL, nombre_cliente TEXT, telefono TEXT, fecha TEXT, hora TEXT, servicio TEXT, nota TEXT, estado TEXT, origen TEXT, almacen_id INTEGER, almacen_uid TEXT, created_at TEXT, updated_at TEXT)");
+            // Upgrade partially initialized appointment tables before installing guards.
+            // This runs under BEGIN IMMEDIATE: concurrent saves cannot race ALTER TABLE.
+            $columns = array_column($db->query('PRAGMA table_info(citas_spa)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+            foreach ([
+                'uid' => 'TEXT', 'nombre_cliente' => 'TEXT', 'telefono' => 'TEXT',
+                'fecha' => 'TEXT', 'hora' => 'TEXT', 'servicio' => 'TEXT',
+                'nota' => 'TEXT', 'estado' => 'TEXT', 'origen' => 'TEXT',
+                'almacen_id' => 'INTEGER', 'almacen_uid' => 'TEXT',
+                'created_at' => 'TEXT', 'updated_at' => 'TEXT',
+            ] as $column => $type) {
+                if (!in_array($column, $columns, true)) {
+                    $db->exec('ALTER TABLE citas_spa ADD COLUMN "' . $column . '" ' . $type);
+                }
+            }
             $db->prepare('INSERT INTO _spa_schedule(id,settings) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET settings=excluded.settings')
                 ->execute([json_encode($settings, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)]);
             $this->installGuards($db);
+            SalonScheduleGuard::install($db);
             if ($settings['enabled']) {
                 $now = new DateTimeImmutable('now', new DateTimeZone($timezone));
                 $today = $now->format('Y-m-d');
-                $rows = $db->prepare("SELECT fecha,hora FROM citas_spa WHERE (fecha>? OR (fecha=? AND hora>=?)) AND COALESCE(estado,'PENDIENTE')<>'CANCELADA'");
+                $rows = $db->prepare("SELECT fecha,hora,nota FROM citas_spa WHERE (fecha>? OR (fecha=? AND hora>=?)) AND COALESCE(estado,'PENDIENTE')<>'CANCELADA'");
                 $rows->execute([$today, $today, $now->format('H:i')]);
                 $counts = [];
                 foreach ($rows->fetchAll() as $row) {
@@ -97,6 +119,8 @@ final class SpaScheduleService
                     foreach ($settings['shifts'] as $shift) if ($row['hora'] >= $shift['start'] && $row['hora'] < $shift['end']) $match = $shift;
                     if (!$match || !in_array((int) $date->format('w'), $days, true)) throw new InvalidArgumentException('Hay citas futuras fuera de estos horarios. Reprográmelas antes de guardar.');
                     $key = $row['fecha'] . ':' . $match['id'];
+                    // Assigned salon appointments are limited by professional overlap, not total bookings per shift.
+                    if (isset(json_decode((string)($row['nota'] ?? ''), true)['tmpos_salon'])) continue;
                     $counts[$key] = ($counts[$key] ?? 0) + 1;
                     if ($counts[$key] > $match['capacity']) throw new InvalidArgumentException('Los cupos no cubren las citas existentes del ' . $row['fecha'] . '.');
                 }
@@ -119,7 +143,7 @@ SELECT CASE WHEN NOT EXISTS (
  SELECT 1 FROM _spa_schedule c, json_each(c.settings,'$.shifts') s
  WHERE NEW.hora>=json_extract(s.value,'$.start') AND NEW.hora<json_extract(s.value,'$.end')
 ) THEN RAISE(ABORT,'Seleccione un horario de atención disponible.') END;
-SELECT CASE WHEN EXISTS (
+SELECT CASE WHEN json_type(CASE WHEN json_valid(NEW.nota) THEN NEW.nota ELSE '{}' END,'$.tmpos_salon') IS NULL AND EXISTS (
  SELECT 1 FROM _spa_schedule c, json_each(c.settings,'$.shifts') s
  WHERE NEW.hora>=json_extract(s.value,'$.start') AND NEW.hora<json_extract(s.value,'$.end')
  AND (SELECT COUNT(*) FROM citas_spa a WHERE a.fecha=NEW.fecha
@@ -176,7 +200,10 @@ SQL;
             if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/D', $time)) throw new InvalidArgumentException('Indique una hora válida.');
             return $time;
         }
-        foreach ($this->availability($project, $date)['shifts'] as $shift) {
+        $availability = $this->availability($project, $date);
+        $salonTime = SalonScheduleGuard::time($input, $settings, $availability);
+        if ($salonTime !== null) return $salonTime;
+        foreach ($availability['shifts'] as $shift) {
             if ($shift['id'] !== ($input['turno'] ?? '')) continue;
             if (!$shift['available']) throw new RuntimeException('El turno seleccionado no está disponible. Elija otro turno o fecha.', 409);
             return $shift['start'];
@@ -211,16 +238,24 @@ SQL;
         $candidate['hora'] = (string) ($input['hora'] ?? $old['hora'] ?? '');
         $settings = $this->get($project);
         $this->date($candidate['fecha'], $settings);
+        $salon = json_decode($candidate['nota'], true)['tmpos_salon'] ?? null;
+        if ($salon) {
+            SalonRuntimeService::warehouse($this->connection($project), ['id'=>(int)($old['almacen_id'] ?? $input['almacen_id'] ?? 0), 'uid'=>(string)($old['almacen_uid'] ?? $input['almacen_uid'] ?? '')]);
+        }
         $sameSlot = $old && $old['fecha'] === $candidate['fecha'] && $old['hora'] === $candidate['hora'];
         if ($settings['enabled'] && !empty($input['turno'])) {
             $selected = null;
             foreach ($settings['shifts'] as $shift) if ($shift['id'] === $input['turno']) $selected = $shift;
             if (!$selected) throw new InvalidArgumentException('Seleccione un turno válido.');
             $sameSlot = $old && $old['fecha'] === $candidate['fecha'] && $old['hora'] >= $selected['start'] && $old['hora'] < $selected['end'];
-            $candidate['hora'] = $sameSlot ? $old['hora'] : $selected['start'];
+            if ($salon) {
+                if ($candidate['hora'] === '') $candidate['hora'] = $selected['start'];
+                $sameSlot = $old && $old['fecha'] === $candidate['fecha'] && $old['hora'] === $candidate['hora'];
+                if ($candidate['hora'] < $selected['start'] || ($salon['e'] ?? '') > $selected['end']) throw new InvalidArgumentException('El servicio debe terminar dentro del turno.');
+            } else $candidate['hora'] = $sameSlot ? $old['hora'] : $selected['start'];
         }
         if ($candidate['estado'] !== 'CANCELADA' && (!$sameSlot || ($old['estado'] ?? '') === 'CANCELADA')) {
-            $candidate['hora'] = $this->bookingTime($project, [...$input, 'fecha' => $candidate['fecha'], 'hora' => $candidate['hora']]);
+            $candidate['hora'] = $this->bookingTime($project, [...$input, 'nota' => $candidate['nota'], 'fecha' => $candidate['fecha'], 'hora' => $candidate['hora']]);
         }
         if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/D', $candidate['hora'])) throw new InvalidArgumentException('Hora inválida.');
         if ($old) $row = $records->update($project, 'citas_spa', $uid, $candidate);

@@ -147,6 +147,7 @@ final class SpaLandingService
         $servicio = mb_strtoupper(trim((string) ($input['servicio'] ?? '')), 'UTF-8');
         if (mb_strlen($servicio) > 160) throw new InvalidArgumentException('El servicio solicitado es demasiado largo.');
         $nota = trim((string) ($input['nota'] ?? ''));
+        if (isset(json_decode($nota, true)['tmpos_salon'])) throw new InvalidArgumentException('La nota contiene una asignacion interna no permitida.');
         if (mb_strlen($nota) > 500) throw new InvalidArgumentException('La nota es demasiado larga.');
 
         return $this->records->create($project, 'citas_spa', [

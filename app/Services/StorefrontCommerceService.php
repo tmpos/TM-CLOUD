@@ -18,6 +18,7 @@ final class StorefrontCommerceService
         'azul' => ['name' => 'Azul', 'order' => 40],
         'stripe' => ['name' => 'Tarjeta con Stripe', 'order' => 50],
         'paypal' => ['name' => 'PayPal', 'order' => 60],
+        'external_link' => ['name' => 'Otro proveedor por enlace', 'order' => 70],
     ];
 
     public function __construct(
@@ -26,6 +27,7 @@ final class StorefrontCommerceService
         private CredentialCipher $cipher,
         private StorefrontService $storefronts,
         private LogService $logs,
+        private ?\Closure $http = null,
     ) {
     }
 
@@ -50,10 +52,11 @@ final class StorefrontCommerceService
              FROM storefront_payment_methods WHERE project_uid=? AND enabled=1 ORDER BY sort_order,id'
         );
         $stmt->execute([$store['project_uid']]);
+        $methods = array_values(array_filter($stmt->fetchAll(), static fn ($row) => $row['provider'] !== 'paypal' || in_array($store['currency'], ['USD','EUR'], true)));
         return array_map(function (array $row): array {
             $row['public_config'] = $this->decode((string) ($row['public_config'] ?? ''));
             return $row;
-        }, $stmt->fetchAll());
+        }, $methods);
     }
 
     public function saveMethods(string $projectUid, array $input): void
@@ -67,7 +70,10 @@ final class StorefrontCommerceService
              WHERE project_uid=? AND provider=?'
         );
         foreach (self::PROVIDERS as $provider => $definition) {
+            if (!array_key_exists($provider, $payments)) continue;
             $values = is_array($payments[$provider] ?? null) ? $payments[$provider] : [];
+            // preserve-external-link when an older dashboard omits its field.
+            if ($provider === 'external_link' && !array_key_exists('payment_url', $values)) continue;
             $select->execute([$projectUid, $provider]);
             $existing = (string) ($select->fetchColumn() ?: '');
             $credentials = $this->credentialsFromInput($provider, $values);
@@ -133,6 +139,7 @@ final class StorefrontCommerceService
             throw new InvalidArgumentException('Escribe la dirección de entrega.');
         }
         $provider = (string) ($input['payment_provider'] ?? '');
+        if ($provider === 'paypal' && !in_array($store['currency'], ['USD','EUR'], true)) throw new InvalidArgumentException('PayPal no admite la moneda de esta tienda.');
         $method = $this->method((string) $store['project_uid'], $provider, true);
         $cart = is_array($input['items'] ?? null) ? array_slice($input['items'], 0, 50) : [];
         if ($cart === []) {
@@ -233,6 +240,15 @@ final class StorefrontCommerceService
         if ($provider === 'paypal') {
             return ['type' => 'redirect', 'url' => $this->createPayPalOrder($store, $order, $method)];
         }
+        // website-external-payment-link: a hosted link never confirms payment by itself.
+        if ($provider === 'external_link') {
+            $public = $this->decode((string)($method['public_config'] ?? ''));
+            $url = trim((string)($public['payment_url'] ?? ''));
+            $parsed = parse_url($url);
+            if (!filter_var($url, FILTER_VALIDATE_URL) || ($parsed['scheme'] ?? '') !== 'https' || isset($parsed['user']) || isset($parsed['pass']) || isset($parsed['fragment'])) throw new RuntimeException('El proveedor no tiene un enlace de pago HTTPS válido.');
+            $this->setPayment($order['uid'], 'pending_external', null, ['external_payment_url'=>$url, 'instructions'=>(string)($method['instructions'] ?? '')]);
+            return ['type'=>'confirmation','url'=>$this->orderUrl($store,$order)];
+        }
         if ($provider === 'azul') {
             $config = $this->decode((string) ($method['public_config'] ?? ''));
             $url = trim((string) ($config['payment_url'] ?? ''));
@@ -254,6 +270,10 @@ final class StorefrontCommerceService
 
     public function completeReturn(array $store, array $order, array $query): array
     {
+        // website-payment-confirmation: never capture a different order or a paid order twice.
+        if ($order['payment_status'] === 'paid') return $this->order($order['uid'], $store['uid']);
+        $reference = $query[$order['payment_provider'] === 'stripe' ? 'session_id' : 'token'] ?? null;
+        if ($reference !== null && (!is_string($reference) || $reference === '' || !hash_equals((string)$order['provider_reference'], $reference))) throw new InvalidArgumentException('La referencia de pago no corresponde al pedido.');
         if ($order['payment_provider'] === 'stripe' && isset($query['session_id'])) {
             $method = $this->method((string) $store['project_uid'], 'stripe', true);
             $session = $this->requestJson(
@@ -262,7 +282,9 @@ final class StorefrontCommerceService
                 [],
                 ['Authorization: Bearer ' . $this->credentials($method)['secret_key']]
             );
-            if (($session['payment_status'] ?? '') === 'paid'
+            if (($session['id'] ?? '') === $order['provider_reference']
+                && strtoupper((string)($session['currency'] ?? '')) === strtoupper($order['currency'])
+                && ($session['payment_status'] ?? '') === 'paid'
                 && ($session['metadata']['order_uid'] ?? '') === $order['uid']
                 && (int) ($session['amount_total'] ?? -1) === (int) round((float) $order['total'] * 100)) {
                 $this->setPayment($order['uid'], 'paid', (string) ($session['id'] ?? ''), $session, true);
@@ -272,14 +294,16 @@ final class StorefrontCommerceService
             $credentials = $this->credentials($method);
             $base = (int) $method['test_mode'] ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com';
             $access = $this->paypalAccessToken($base, $credentials);
-            $capture = $this->requestJson(
+            $existingPayment = $this->requestJson('GET', $base . '/v2/checkout/orders/' . rawurlencode($reference), [], ['Authorization: Bearer ' . $access]);
+            $capture = ($existingPayment['status'] ?? '') === 'COMPLETED' ? $existingPayment : $this->requestJson(
                 'POST',
                 $base . '/v2/checkout/orders/' . rawurlencode((string) $query['token']) . '/capture',
                 new \stdClass(),
-                ['Authorization: Bearer ' . $access, 'Content-Type: application/json']
+                ['Authorization: Bearer ' . $access, 'Content-Type: application/json', 'PayPal-Request-Id: capture-' . $order['uid']]
             );
             $captured = $capture['purchase_units'][0]['payments']['captures'][0]['amount'] ?? [];
-            if (($capture['status'] ?? '') === 'COMPLETED'
+            if (($capture['purchase_units'][0]['payments']['captures'][0]['status'] ?? '') === 'COMPLETED'
+                && ($capture['status'] ?? '') === 'COMPLETED'
                 && (string) ($capture['id'] ?? '') === (string) $order['provider_reference']
                 && strtoupper((string) ($captured['currency_code'] ?? '')) === strtoupper((string) $order['currency'])
                 && abs((float) ($captured['value'] ?? -1) - (float) $order['total']) < 0.01) {
@@ -350,6 +374,7 @@ final class StorefrontCommerceService
     private function publicConfigFromInput(string $provider, array $input): array
     {
         return match ($provider) {
+            'external_link' => ['payment_url' => $this->url((string) ($input['payment_url'] ?? ''))],
             'stripe' => ['publishable_key' => mb_substr(trim((string) ($input['publishable_key'] ?? '')), 0, 220)],
             'paypal' => ['client_id' => mb_substr(trim((string) ($input['client_id'] ?? '')), 0, 220)],
             'azul' => [
@@ -403,7 +428,7 @@ final class StorefrontCommerceService
             'POST',
             'https://api.stripe.com/v1/checkout/sessions',
             $data,
-            ['Authorization: Bearer ' . ($credentials['secret_key'] ?? ''), 'Content-Type: application/x-www-form-urlencoded'],
+            ['Authorization: Bearer ' . ($credentials['secret_key'] ?? ''), 'Content-Type: application/x-www-form-urlencoded', 'Idempotency-Key: checkout-' . $order['uid']],
             true
         );
         if (!isset($session['id'], $session['url'])) {
@@ -498,6 +523,7 @@ final class StorefrontCommerceService
 
     private function requestJson(string $method, string $url, array|\stdClass $data, array $headers, bool $form = false): array
     {
+        if ($this->http) return ($this->http)($method, $url, $data, $headers, $form);
         if (!function_exists('curl_init')) {
             throw new RuntimeException('La extensión cURL de PHP es necesaria para pagos en línea.');
         }
