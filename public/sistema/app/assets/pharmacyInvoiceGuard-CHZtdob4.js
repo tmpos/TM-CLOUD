@@ -1,0 +1,1 @@
+var e=`Esta factura tiene lotes dispensados. Para modificarla o devolver productos se requiere una conciliación de lotes; esta operación todavía no está disponible.`;function t(e){let t=e?.otro;if(typeof t==`string`)try{t=JSON.parse(t)}catch{return!1}return!!(t&&typeof t==`object`&&t.pharmacy&&typeof t.pharmacy==`object`)}export{t as n,e as t};

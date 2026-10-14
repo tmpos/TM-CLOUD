@@ -1,0 +1,1 @@
+function e(e,t,n){let r=Math.max(1,Math.floor(t/(8*n))),i=[];for(let t of e.split(/\r?\n/)){let e=``;for(let n of t.split(/\s+/).filter(Boolean)){e&&e.length+n.length+1>r&&(i.push(e),e=``);let t=n;for(;t.length>r;)i.push(t.slice(0,r)),t=t.slice(r);e=e?`${e} ${t}`:t}i.push(e)}return i}export{e as t};

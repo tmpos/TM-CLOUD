@@ -1,5 +1,19 @@
 # TMPBase
 
+## Publicación TMPOS 6.3.1
+
+Incluye la interfaz web de TMPOS 6.3.1 en `public/sistema/app`, el listado global y la gestión de ventas en espera, la política de venta sin stock y los módulos comerciales presentes en el VPS. Conserva la notificación de estado de licencias que ya estaba en GitHub.
+
+- [TMPOS 6.3.1: cambios e instalador Windows](https://github.com/tmpos/tmpos-online/releases/tag/v6.3.1).
+- [6a335cd — Runtime publicado: ventas en espera, stock y módulos comerciales](https://github.com/tmpos/TM-CLOUD/commit/6a335cd).
+- [8b9d843 — Normalización del runtime PHP](https://github.com/tmpos/TM-CLOUD/commit/8b9d843).
+- [Commits del backend de esta publicación](https://github.com/tmpos/TM-CLOUD/compare/b344e6d...tmpos-v6.3.1).
+- [Código de esta publicación](https://github.com/tmpos/TM-CLOUD/tree/tmpos-v6.3.1).
+
+La pantalla **Ventas → Ventas en espera** consulta todas las sucursales del proyecto. Eliminar retira el registro de la lista compartida sin alterar facturas ni inventario, y conserva una marca para evitar que una copia local antigua lo vuelva a crear.
+
+Las claves, las bases de datos y los archivos de los usuarios no se incluyen en esta publicación. La web se instala en el directorio persistente del VPS y tambi?n se incorpora a la imagen para instalaciones nuevas. Ver [evidencia de publicación](docs/RELEASE-TMPOS-6.3.1.md).
+
 ## TMPOS completo en el navegador
 
 TMPBase incluye ahora el sistema empresarial en **`/sistema`**. Cada usuario ve solamente las empresas asignadas en `project_memberships`, y cada empresa trabaja sobre su propia base SQLite. Las claves privadas del proyecto nunca se envían al navegador.
