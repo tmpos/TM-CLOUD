@@ -12,7 +12,7 @@ final class StorefrontDesignService
     {
         if (!is_array($input)) throw new \InvalidArgumentException('Diseño inválido.');
         $d = array_replace(self::defaults(), $input);
-        foreach (['preset'=>['classic','modern','boutique','market','gourmet','minimal','landing','custom','executive','atelier','wellness','urban','panorama','restaurant','gym','spa'],'hero'=>['split','center','compact'],'header'=>['standard','center'],'image_ratio'=>['square','portrait','wide']] as $key=>$allowed) {
+        foreach (['preset'=>['classic','modern','boutique','market','gourmet','minimal','landing','custom','executive','atelier','wellness','urban','panorama','restaurant','gym','spa','events'],'hero'=>['split','center','compact'],'header'=>['standard','center'],'image_ratio'=>['square','portrait','wide']] as $key=>$allowed) {
             if (!in_array($d[$key],$allowed,true)) throw new \InvalidArgumentException('Distribución de diseño inválida.');
         }
         foreach (['width'=>[960,1600],'columns'=>[2,5],'spacing'=>[0,96]] as $key=>[$min,$max]) {

@@ -100,7 +100,7 @@ if (in_array($heroMode, ['image', 'carousel'], true) && !$heroImages) $heroMode 
 <main>
 <?php // website-section-loop: template paths come exclusively from server constants.
 // website-custom-builder
-if (!$isFiltered && in_array(($store['web_editor']['design']['preset'] ?? ''), ['custom','landing','restaurant','gym','spa'], true)) { require __DIR__ . '/storefront-builder.php'; } else {
+if (!$isFiltered && in_array(($store['web_editor']['design']['preset'] ?? ''), ['custom','landing','restaurant','gym','spa','events'], true)) { require __DIR__ . '/storefront-builder.php'; } else {
 $websiteSections = $isFiltered ? [['id'=>'hero','visible'=>true],['id'=>'catalog','visible'=>true]] : $store['web_editor']['sections'];
 foreach ($websiteSections as $websiteSection):
     if (!$websiteSection['visible'] || !in_array($websiteSection['id'], \App\Services\StorefrontEditorService::SECTIONS, true)) continue;
