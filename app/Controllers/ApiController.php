@@ -1047,7 +1047,7 @@ final class ApiController
         header('Cache-Control: no-store');
         header('Referrer-Policy: no-referrer');
         header('X-Content-Type-Options: nosniff');
-        header('Content-Security-Policy: default-src \'none\'; style-src \'unsafe-inline\'; form-action \'self\'; base-uri \'none\'');
+        header('Content-Security-Policy: default-src \'none\'; img-src \'self\'; style-src \'unsafe-inline\'; form-action \'self\'; base-uri \'none\'');
         header('Content-Type: text/html; charset=UTF-8');
         $page = null;
         $website = [];
@@ -1076,6 +1076,7 @@ final class ApiController
             $error = $cause->getMessage();
             $events = $this->events->list($project, true);
         }
+        $config = $this->config;
         require dirname(__DIR__) . '/Views/events-landing.php';
     }
 

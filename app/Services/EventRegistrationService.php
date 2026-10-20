@@ -41,6 +41,27 @@ final class EventRegistrationService
         )");
         $this->db->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_event_participant_email ON event_participants(event_uid, email)');
         $this->db->exec('CREATE INDEX IF NOT EXISTS idx_event_participants_event ON event_participants(event_uid, status)');
+        $this->addColumns('events', ['image' => "TEXT NOT NULL DEFAULT ''"]);
+        $this->addColumns('event_pages', [
+            'eyebrow' => "TEXT NOT NULL DEFAULT ''", 'hero_image' => "TEXT NOT NULL DEFAULT ''",
+            'about_title' => "TEXT NOT NULL DEFAULT ''", 'about_text' => "TEXT NOT NULL DEFAULT ''",
+            'highlights' => "TEXT NOT NULL DEFAULT ''", 'cta_label' => "TEXT NOT NULL DEFAULT ''",
+        ]);
+    }
+
+    private function addColumns(string $table, array $columns): void
+    {
+        $existing = array_column($this->db->query("PRAGMA table_info($table)")->fetchAll(PDO::FETCH_ASSOC), 'name');
+        foreach ($columns as $name => $definition) {
+            if (!in_array($name, $existing, true)) $this->db->exec("ALTER TABLE $table ADD COLUMN $name $definition");
+        }
+    }
+
+    private function image(array $input, string $key, string $fallback = ''): string
+    {
+        $image = trim((string) ($input[$key] ?? $fallback));
+        if ($image !== '' && !preg_match('/^fil_[A-Za-z0-9_-]{1,100}$/', $image)) throw new InvalidArgumentException('Imagen no válida. Súbela desde TMPOS.');
+        return $image;
     }
 
     private function localNow(array $project): string
@@ -117,14 +138,15 @@ final class EventRegistrationService
         $this->db->exec('BEGIN IMMEDIATE');
         try {
             $current = $uid !== '' ? $this->event($project, $uid) : null;
+            $image = $this->image($input, 'image', (string) ($current['image'] ?? ''));
             if ($capacity !== null && $current && $capacity < $this->present($current)['registered']) throw new InvalidArgumentException('No puedes reducir los cupos por debajo de los inscritos.');
             if ($current) {
-                $this->db->prepare('UPDATE events SET title=?, description=?, speaker=?, event_date=?, event_time=?, venue=?, room=?, capacity=?, published=?, registration_open=?, updated_at=? WHERE uid=? AND project_uid=?')
-                    ->execute([$title, $description, $speaker, $date, $time, $venue, $room, $capacity, $published, $open, $now, $uid, $project['uid']]);
+                $this->db->prepare('UPDATE events SET title=?, description=?, image=?, speaker=?, event_date=?, event_time=?, venue=?, room=?, capacity=?, published=?, registration_open=?, updated_at=? WHERE uid=? AND project_uid=?')
+                    ->execute([$title, $description, $image, $speaker, $date, $time, $venue, $room, $capacity, $published, $open, $now, $uid, $project['uid']]);
             } else {
                 $uid = Support::uid('evt_');
-                $this->db->prepare('INSERT INTO events(uid,project_uid,title,description,speaker,event_date,event_time,venue,room,capacity,published,registration_open,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-                    ->execute([$uid, $project['uid'], $title, $description, $speaker, $date, $time, $venue, $room, $capacity, $published, $open, $now, $now]);
+                $this->db->prepare('INSERT INTO events(uid,project_uid,title,description,image,speaker,event_date,event_time,venue,room,capacity,published,registration_open,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+                    ->execute([$uid, $project['uid'], $title, $description, $image, $speaker, $date, $time, $venue, $room, $capacity, $published, $open, $now, $now]);
             }
             $saved = $this->present($this->event($project, $uid));
             $this->db->commit();
@@ -215,13 +237,20 @@ final class EventRegistrationService
             $title = $this->value($input, 'title', 160, true);
             $intro = $this->value($input, 'introduction', 1000);
             $color = $this->value($input, 'color', 7, true);
+            $current = $this->page($project);
+            $eyebrow = $this->value($input + $current, 'eyebrow', 90);
+            $heroImage = $this->image($input, 'hero_image', (string) $current['hero_image']);
+            $aboutTitle = $this->value($input + $current, 'about_title', 160);
+            $aboutText = $this->value($input + $current, 'about_text', 1600);
+            $highlights = $this->value($input + $current, 'highlights', 600);
+            $ctaLabel = $this->value($input + $current, 'cta_label', 50);
             if (!preg_match('/^#[0-9a-fA-F]{6}$/', $color)) throw new InvalidArgumentException('Color no válido.');
-            $this->db->prepare('INSERT INTO event_pages(project_uid,enabled,title,introduction,color,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(project_uid) DO UPDATE SET enabled=excluded.enabled,title=excluded.title,introduction=excluded.introduction,color=excluded.color,updated_at=excluded.updated_at')
-                ->execute([$project['uid'], ($input['enabled'] ?? false) === true ? 1 : 0, $title, $intro, $color, Support::now()]);
+            $this->db->prepare('INSERT INTO event_pages(project_uid,enabled,title,introduction,color,eyebrow,hero_image,about_title,about_text,highlights,cta_label,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_uid) DO UPDATE SET enabled=excluded.enabled,title=excluded.title,introduction=excluded.introduction,color=excluded.color,eyebrow=excluded.eyebrow,hero_image=excluded.hero_image,about_title=excluded.about_title,about_text=excluded.about_text,highlights=excluded.highlights,cta_label=excluded.cta_label,updated_at=excluded.updated_at')
+                ->execute([$project['uid'], ($input['enabled'] ?? false) === true ? 1 : 0, $title, $intro, $color, $eyebrow, $heroImage, $aboutTitle, $aboutText, $highlights, $ctaLabel, Support::now()]);
         }
-        $statement = $this->db->prepare('SELECT enabled,title,introduction,color FROM event_pages WHERE project_uid=?');
+        $statement = $this->db->prepare('SELECT enabled,title,introduction,color,eyebrow,hero_image,about_title,about_text,highlights,cta_label FROM event_pages WHERE project_uid=?');
         $statement->execute([$project['uid']]);
-        $page = $statement->fetch(PDO::FETCH_ASSOC) ?: ['enabled' => 0, 'title' => 'Próximos eventos', 'introduction' => '', 'color' => '#2563eb'];
+        $page = $statement->fetch(PDO::FETCH_ASSOC) ?: ['enabled' => 0, 'title' => 'Próximos eventos', 'introduction' => '', 'color' => '#2563eb', 'eyebrow' => '', 'hero_image' => '', 'about_title' => '', 'about_text' => '', 'highlights' => '', 'cta_label' => 'Explorar eventos'];
         $page['enabled'] = (bool) $page['enabled'];
         $page['url'] = rtrim((string) ($this->config['url'] ?? ''), '/') . '/eventos/' . rawurlencode((string) $project['slug']);
         return $page;
