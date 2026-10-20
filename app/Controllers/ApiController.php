@@ -1066,7 +1066,7 @@ final class ApiController
                 $input = Http::input();
                 $result = $this->events->register($project, $input, true);
                 $_SESSION['event_registration_success'] = ['slug' => $slug, 'created_at' => time(), 'name' => trim((string) ($input['name'] ?? '')), 'email' => trim((string) ($input['email'] ?? ''))] + $result;
-                header('Location: /eventos/' . rawurlencode($slug) . '#confirmacion', true, 303);
+                Flight::redirect('/eventos/' . rawurlencode($slug) . '#confirmacion', 303);
                 return;
             }
             $events = $this->events->list($project, true);
