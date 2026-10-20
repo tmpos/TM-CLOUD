@@ -38,6 +38,7 @@ use App\Services\InvoiceSignatureService;
 use App\Services\CustomerRegistrationService;
 use App\Services\SpaAppointmentService;
 use App\Services\SpaLandingService;
+use App\Services\EventRegistrationService;
 use App\Services\StorefrontService;
 use App\Services\StorefrontCommerceService;
 use App\Services\StorefrontAdminService;
@@ -85,13 +86,14 @@ final class App
         $customerRegistrations = new CustomerRegistrationService($db, $config, $logs, $schema, $records, $webhooks);
         $spaAppointments = new SpaAppointmentService($db, $config, $logs, $schema, $records, $webhooks);
         $spaLanding = new SpaLandingService($db, $config, $records);
+        $events = new EventRegistrationService($db, $config, $schema);
         $storefronts = new StorefrontService($db, $config, $projects, $schema, $records);
         $credentialCipher = new CredentialCipher($config['storage']);
         $storefrontCommerce = new StorefrontCommerceService($db, $config, $credentialCipher, $storefronts, $logs);
         $storefrontInventory = new StorefrontInventoryService($projects, $schema, $logs, $webhooks);
         $storefrontAdmins = new StorefrontAdminService($db, $storefronts, $storefrontInventory, $logs);
         $portalAuth = new PortalAuth($db);
-        $systemRuntime = new SystemRuntimeService($schema, $logs, $sharedDocuments, $webhooks, $signatures, $customerRegistrations, $spaAppointments, $spaLanding, new \App\Services\StorefrontSettingsService($storefronts, new \App\Services\StorefrontPaymentSettingsService($db, $credentialCipher, $storefrontCommerce, $storefronts)), new \App\Services\WebsiteOrdersService($db, $schema), new \App\Services\CompanySignatureService($schema, $config));
+        $systemRuntime = new SystemRuntimeService($schema, $logs, $sharedDocuments, $webhooks, $signatures, $customerRegistrations, $spaAppointments, $spaLanding, new \App\Services\StorefrontSettingsService($storefronts, new \App\Services\StorefrontPaymentSettingsService($db, $credentialCipher, $storefrontCommerce, $storefronts)), new \App\Services\WebsiteOrdersService($db, $schema), new \App\Services\CompanySignatureService($schema, $config), $events);
         $projectSql = new ProjectSqlApiService($schema, $logs);
         $metrics = new MetricsService($db);
         $migrations = new MigrationService($db, $config['storage']);
@@ -105,7 +107,7 @@ final class App
         (new SystemController($portalAuth, $projects, $systemRuntime, $keys, $systemApps, $projectSql, $storage))->register();
         (new StorefrontController($config, $storefronts, $projects, $records, $pdf, $keys, $storefrontCommerce, $mail, $spaAppointments))->register();
         (new StorefrontAdminController($storefrontAdmins, $storefronts, $projects, $pdf, $mail))->register();
-        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics, $mail, $sharedDocuments, $pdf, $portalAuth, $projectSql, $signatures, $customerRegistrations, $spaAppointments, $spaLanding, $systemRuntime, $onboarding))->register();
+        (new ApiController($config, $projects, $schema, $records, $transfer, $storage, $keys, $webhooks, $licenses, $logs, $backups, $metrics, $mail, $sharedDocuments, $pdf, $portalAuth, $projectSql, $signatures, $customerRegistrations, $spaAppointments, $spaLanding, $systemRuntime, $onboarding, $events))->register();
     }
 
     private static function ensureStorage(string $storage): void

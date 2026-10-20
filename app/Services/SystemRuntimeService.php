@@ -23,7 +23,7 @@ final class SystemRuntimeService
 
     private ?DateTimeZone $requestTimezone = null;
 
-    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks, private InvoiceSignatureService $signatures, private CustomerRegistrationService $customerRegistrations, private ?SpaAppointmentService $spaAppointments = null, private ?SpaLandingService $spaLanding = null, private ?StorefrontSettingsService $website = null, private ?WebsiteOrdersService $websiteOrders = null, private ?CompanySignatureService $companySignatures = null)
+    public function __construct(private SchemaService $schema, private LogService $logs, private SharedDocumentService $sharedDocuments, private WebhookService $webhooks, private InvoiceSignatureService $signatures, private CustomerRegistrationService $customerRegistrations, private ?SpaAppointmentService $spaAppointments = null, private ?SpaLandingService $spaLanding = null, private ?StorefrontSettingsService $website = null, private ?WebsiteOrdersService $websiteOrders = null, private ?CompanySignatureService $companySignatures = null, private ?EventRegistrationService $events = null)
     {
     }
 
@@ -64,6 +64,7 @@ final class SystemRuntimeService
             'fiscalHN:estado', 'farmacia:obtenerEstado', 'salon:listarAnticipos', 'config:get', 'auth:login', 'caja:getTurnoActivo', 'caja:getTurnoAbierto',
             'facturas:obtenerFirma', 'web:listarPedidos', 'web:detallePedido', 'clientes:obtenerFormulario', 'documentos:obtenerDiseno', 'documentos:estadoFirmaRepresentante',
             'spa:obtenerHorarios', 'spa:obtenerLanding', 'spa:disponibilidad', 'spa:listarCitas', 'web:obtenerConfiguracion',
+            'eventos:listar', 'eventos:participantes', 'eventos:obtenerPagina',
             'cuadre:listar', 'cuadre:ventasTurno', 'cuadre:gastosTurno', 'app:getName',
             'app:getVersion', 'getServerUrl', 'getPrinters', 'scan:bluetooth',
         ], true)) return false;
@@ -365,6 +366,12 @@ final class SystemRuntimeService
         if ($channel === 'citas:crearEnlaceSpa' && $this->spaAppointments) return ['success' => true, 'data' => $this->spaAppointments->create($project, (array) ($args[0] ?? []), (string) ($actor['email'] ?? $actor['usuario'] ?? 'system'))];
         if ($channel === 'spa:obtenerLanding' && $this->spaLanding) return ['success' => true, 'data' => $this->spaLanding->get($project)];
         if ($channel === 'spa:guardarLanding' && $this->spaLanding) return ['success' => true, 'data' => $this->spaLanding->save($project, (array) ($args[0] ?? []))];
+        $eventOperations = ['eventos:listar' => 'list', 'eventos:guardar' => 'save', 'eventos:archivar' => 'archive', 'eventos:participantes' => 'participants', 'eventos:inscribir' => 'register', 'eventos:asistencia' => 'attendance', 'eventos:obtenerPagina' => 'page', 'eventos:guardarPagina' => 'page-save'];
+        if (isset($eventOperations[$channel])) {
+            if (!$this->events) throw new RuntimeException('Gestión de eventos no disponible.', 404);
+            if (!in_array($channel, ['eventos:listar', 'eventos:participantes', 'eventos:obtenerPagina'], true) && !$this->canConfigureSystem($actor)) throw new RuntimeException('Solo Administrador o Soporte puede modificar eventos.', 403);
+            return ['success' => true, 'data' => $this->events->handle($project, $eventOperations[$channel], (array) ($args[0] ?? []))];
+        }
         if ($channel === 'facturas:crearEnlacePdf') return $this->shareInvoice($db, $project, (array) ($args[0] ?? []));
         if ($channel === 'facturas:crearEnlaceFirma') return $this->signatureInvoice($db, $project, (array) ($args[0] ?? []), true);
         if ($channel === 'facturas:obtenerFirma') return $this->signatureInvoice($db, $project, (array) ($args[0] ?? []), false);

@@ -16,6 +16,7 @@ use App\Services\InvoiceSignatureService;
 use App\Services\CustomerRegistrationService;
 use App\Services\SpaAppointmentService;
 use App\Services\SpaLandingService;
+use App\Services\EventRegistrationService;
 use App\Services\SpaScheduleService;
 use App\Services\PdfService;
 use App\Core\PortalAuth;
@@ -57,6 +58,7 @@ final class ApiController
         private SpaLandingService $spaLanding,
         private SystemRuntimeService $runtime,
         private ClientOnboardingService $onboarding,
+        private EventRegistrationService $events,
     ) {
     }
 
@@ -397,6 +399,18 @@ final class ApiController
                 Http::error($e, $status);
             }
         });
+        foreach (['list', 'save', 'archive', 'participants', 'register', 'attendance', 'page', 'page-save'] as $operation) {
+            Flight::route('POST /api/license/events/' . $operation, function () use ($operation): void {
+                try {
+                    $input = Http::input();
+                    $project = $this->licensedProject($input, 'license-events-' . $operation);
+                    Flight::json(['data' => $this->events->handle($project, $operation, $input)]);
+                } catch (\Throwable $error) {
+                    $status = in_array($error->getCode(), [403, 404, 409, 423, 429], true) ? $error->getCode() : 422;
+                    Http::error($error, $status);
+                }
+            });
+        }
         Flight::route('POST /api/@project/mail/send', fn ($project) => $this->runProject($project, true, function ($p): void {
             $input = Http::input();
             $job = $this->mail->queue(
@@ -487,6 +501,8 @@ final class ApiController
         Flight::route('POST /register/spa/@token', fn ($token) => $this->serveSpaAppointmentPage((string) $token, true));
         Flight::route('GET /spa/@slug', fn ($slug) => $this->serveSpaLandingPage((string) $slug, false));
         Flight::route('POST /spa/@slug', fn ($slug) => $this->serveSpaLandingPage((string) $slug, true));
+        Flight::route('GET /eventos/@slug', fn ($slug) => $this->serveEventsPage((string) $slug, false));
+        Flight::route('POST /eventos/@slug', fn ($slug) => $this->serveEventsPage((string) $slug, true));
         Flight::route('GET /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, false));
         Flight::route('POST /onboarding/@token', fn ($token) => $this->serveOnboardingPage((string) $token, true));
         Flight::route('GET /share/invoice/@token', function ($token): void {
@@ -1022,6 +1038,41 @@ final class ApiController
             $error = $e->getMessage();
         }
         require dirname(__DIR__) . '/Views/spa-landing.php';
+    }
+
+    private function serveEventsPage(string $slug, bool $submit): void
+    {
+        header('Cache-Control: no-store');
+        header('Referrer-Policy: no-referrer');
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Security-Policy: default-src \'none\'; style-src \'unsafe-inline\'; form-action \'self\'; base-uri \'none\'');
+        header('Content-Type: text/html; charset=UTF-8');
+        $page = null;
+        $events = [];
+        $registered = !$submit && ($_GET['inscrito'] ?? '') === '1';
+        $error = '';
+        try {
+            $this->keys->rateLimitPublic('events-page:' . hash('sha256', $slug . ':' . Http::clientIp()), 30);
+            $project = $this->projects->findActiveBySlug($slug);
+            $page = $this->events->page($project);
+            if (!$page['enabled']) throw new \RuntimeException('Página no disponible.', 404);
+            if ($submit) {
+                $this->events->register($project, Http::input(), true);
+                header('Location: /eventos/' . rawurlencode($slug) . '?inscrito=1#agenda', true, 303);
+                return;
+            }
+            $events = $this->events->list($project, true);
+        } catch (\Throwable $cause) {
+            if (!$page || !$page['enabled']) {
+                Flight::response()->status(404);
+                echo '<!doctype html><html lang="es"><meta charset="utf-8"><title>Página no disponible</title><body><main><h1>Página no disponible</h1></main></body></html>';
+                return;
+            }
+            Flight::response()->status(in_array($cause->getCode(), [409, 429], true) ? $cause->getCode() : 422);
+            $error = $cause->getMessage();
+            $events = $this->events->list($project, true);
+        }
+        require dirname(__DIR__) . '/Views/events-landing.php';
     }
 
     private function signingDocument(string $token): array
