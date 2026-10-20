@@ -165,6 +165,23 @@ final class EventRegistrationService
         return ['archived' => true];
     }
 
+    public function delete(array $project, string $uid): array
+    {
+        $this->db->exec('BEGIN IMMEDIATE');
+        try {
+            $this->event($project, $uid);
+            $participants = $this->db->prepare('DELETE FROM event_participants WHERE event_uid=? AND project_uid=?');
+            $participants->execute([$uid, $project['uid']]);
+            $deletedParticipants = $participants->rowCount();
+            $this->db->prepare('DELETE FROM events WHERE uid=? AND project_uid=?')->execute([$uid, $project['uid']]);
+            $this->db->commit();
+            return ['deleted' => true, 'participants_deleted' => $deletedParticipants];
+        } catch (\Throwable $error) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $error;
+        }
+    }
+
     public function participants(array $project, string $uid): array
     {
         $this->event($project, $uid);
@@ -261,7 +278,10 @@ final class EventRegistrationService
         return match ($operation) {
             'list' => $this->list($project),
             'save' => $this->save($project, $input),
-            'archive' => $this->archive($project, (string) ($input['uid'] ?? '')),
+            'archive' => ($input['permanent'] ?? false) === true
+                ? $this->delete($project, (string) ($input['uid'] ?? ''))
+                : $this->archive($project, (string) ($input['uid'] ?? '')),
+            'delete' => $this->delete($project, (string) ($input['uid'] ?? '')),
             'participants' => $this->participants($project, (string) ($input['event_uid'] ?? '')),
             'register' => $this->register($project, $input, false),
             'attendance' => $this->attendance($project, (string) ($input['uid'] ?? ''), (string) ($input['status'] ?? '')),

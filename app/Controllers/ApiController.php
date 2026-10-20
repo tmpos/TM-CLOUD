@@ -401,7 +401,7 @@ final class ApiController
                 Http::error($e, $status);
             }
         });
-        foreach (['list', 'save', 'archive', 'participants', 'register', 'attendance', 'page', 'page-save'] as $operation) {
+        foreach (['list', 'save', 'archive', 'delete', 'participants', 'register', 'attendance', 'page', 'page-save'] as $operation) {
             Flight::route('POST /api/license/events/' . $operation, function () use ($operation): void {
                 try {
                     $input = Http::input();

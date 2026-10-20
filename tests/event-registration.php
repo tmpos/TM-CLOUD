@@ -75,4 +75,17 @@ try { $service->participants($b, $event['uid']); throw new RuntimeException('Se 
 catch (RuntimeException $error) { if ($error->getCode() !== 404) throw $error; }
 $service->archive($a, $event['uid']);
 if ($service->list($a, true) !== []) throw new RuntimeException('Evento archivado visible');
+$removable = $service->save($a, [
+    'title' => 'Evento temporal', 'speaker' => 'Ana', 'event_date' => date('Y-m-d', strtotime('+8 days')),
+    'event_time' => '10:30', 'venue' => 'Hotel', 'capacity' => 3, 'published' => true,
+]);
+$attendee = $service->register($a, ['event_uid' => $removable['uid'], 'name' => 'Temporal', 'email' => 'temporal@example.test'], false);
+$service->attendance($a, $attendee['uid'], 'CANCELADO');
+try { $service->delete($b, $removable['uid']); throw new RuntimeException('Se eliminó un evento de otro proyecto'); }
+catch (RuntimeException $error) { if ($error->getCode() !== 404) throw $error; }
+if (count($service->list($a, true)) !== 1) throw new RuntimeException('La eliminación cruzada alteró el evento');
+$removed = $service->handle($a, 'archive', ['uid' => $removable['uid'], 'permanent' => true]);
+if (!$removed['deleted'] || $removed['participants_deleted'] !== 1 || count($service->list($a, true)) !== 0) throw new RuntimeException('La eliminación no borró el evento y sus participantes');
+try { $service->participants($a, $removable['uid']); throw new RuntimeException('Quedaron participantes de un evento eliminado'); }
+catch (RuntimeException $error) { if ($error->getCode() !== 404) throw $error; }
 echo "event-registration: ok\n";
