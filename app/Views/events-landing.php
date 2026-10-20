@@ -1,7 +1,29 @@
 <?php
 $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 $title = (string) ($page['title'] ?? 'Próximos eventos');
-$color = preg_match('/^#[0-9a-fA-F]{6}$/', (string) ($page['color'] ?? '')) ? $page['color'] : '#2563eb';
+$design = $website['web_editor']['design'] ?? [];
+$preset = preg_match('/^[a-z0-9_-]{1,40}$/', (string) ($design['preset'] ?? '')) ? $design['preset'] : 'classic';
+$layout = in_array(($design['hero'] ?? ''), ['split', 'center', 'compact'], true) ? $design['hero'] : 'split';
+$cards = in_array(($website['card_style'] ?? ''), ['elevated', 'outlined', 'minimal'], true) ? $website['card_style'] : 'outlined';
+$safeColor = static fn (mixed $value, string $fallback): string => preg_match('/^#[0-9a-fA-F]{6}$/', (string) $value) ? (string) $value : $fallback;
+$color = $safeColor($preset === 'classic' ? ($page['color'] ?? null) : ($website['primary_color'] ?? null), '#2563eb');
+$accent = $safeColor($website['accent_color'] ?? null, '#f59e0b');
+$ink = $safeColor($website['text_color'] ?? null, '#14213d');
+$muted = $safeColor($website['muted_color'] ?? null, '#64748b');
+$surface = $safeColor($website['surface_color'] ?? null, '#ffffff');
+$background = $safeColor($website['background_color'] ?? null, '#f5f8fc');
+$header = $safeColor($website['header_color'] ?? null, '#ffffff');
+$footer = $safeColor($website['footer_color'] ?? null, '#14213d');
+$hero = $safeColor($website['hero_background_color'] ?? null, '#102039');
+$radius = max(8, min(32, (int) ($website['border_radius'] ?? 22)));
+$width = max(960, min(1600, (int) ($design['width'] ?? 1120)));
+$font = match ($website['font_family'] ?? 'system') {
+    'serif' => 'Georgia,serif',
+    'poppins' => '"Trebuchet MS",Arial,sans-serif',
+    'inter' => 'Inter,system-ui,-apple-system,"Segoe UI",sans-serif',
+    default => 'system-ui,-apple-system,"Segoe UI",sans-serif',
+};
+$brand = trim((string) ($website['store_name'] ?? '')) ?: 'Eventos';
 $submittedEvent = (string) ($_POST['event_uid'] ?? '');
 ?>
 <!doctype html>
@@ -10,16 +32,17 @@ $submittedEvent = (string) ($_POST['event_uid'] ?? '');
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="index,follow"><title><?= $escape($title) ?> · Eventos</title>
 <style>
-:root{--brand:<?= $escape($color) ?>;--ink:#14213d;--muted:#64748b;--line:#dbe4ef;--surface:#fff}
-*{box-sizing:border-box}body{margin:0;font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:#f5f8fc}
-.wrap{max-width:1120px;margin:auto;padding:0 22px}.top{background:#fff;border-bottom:1px solid var(--line)}.top .wrap{display:flex;align-items:center;justify-content:space-between;padding-top:15px;padding-bottom:15px}.brand{font-size:18px;font-weight:800;letter-spacing:-.03em}.top a{color:var(--brand);font-weight:700;text-decoration:none}
-.hero{background:radial-gradient(circle at 85% 10%,#ffffff30,transparent 26%),linear-gradient(125deg,#102039,var(--brand));color:#fff;padding:78px 0 84px}.eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;font-weight:800;opacity:.82}.hero h1{font-size:clamp(38px,6vw,68px);line-height:1.05;letter-spacing:-.055em;max-width:800px;margin:15px 0 20px}.hero p{max-width:670px;font-size:18px;opacity:.9;margin:0}.intro{padding:45px 0 24px}.intro h2{font-size:28px;letter-spacing:-.03em;margin:0 0 7px}.intro p{color:var(--muted);margin:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:22px;padding-bottom:80px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 18px 45px #1932510d}.stripe{height:7px;background:var(--brand)}.content{padding:27px}.date{display:inline-block;font-size:13px;font-weight:800;color:var(--brand);background:#eef4ff;border-radius:999px;padding:6px 12px}.card h3{font-size:24px;line-height:1.2;letter-spacing:-.035em;margin:19px 0 10px}.desc{white-space:pre-line;color:#475569;min-height:48px}.facts{list-style:none;padding:0;margin:21px 0;display:grid;gap:9px}.facts li{display:flex;gap:10px;color:#334155}.facts strong{min-width:88px}.seats{color:#0f766e;font-size:13px;font-weight:700}.full{color:#b45309}.enroll{border-top:1px solid var(--line);padding-top:19px}.enroll summary{cursor:pointer;list-style:none;background:var(--brand);color:#fff;text-align:center;border-radius:12px;padding:12px;font-weight:800}.enroll summary::-webkit-details-marker{display:none}.enroll[open] summary{margin-bottom:18px}.form{display:grid;grid-template-columns:1fr 1fr;gap:13px}.form .wide{grid-column:1/-1}.form label{display:block;font-size:13px;font-weight:700;margin-bottom:5px}.form input:not([type=checkbox]){width:100%;padding:11px;border:1px solid #bdcbdc;border-radius:10px;font:inherit;background:#fff}.form input:focus{outline:2px solid var(--brand);outline-offset:2px}.check{display:flex;gap:9px;align-items:flex-start;font-size:13px;color:#475569}.check input{margin-top:4px}.submit{border:0;background:var(--brand);color:#fff;border-radius:10px;padding:12px 18px;font:inherit;font-weight:800;cursor:pointer;width:100%}.notice{padding:15px 18px;margin:25px 0 0;border-radius:12px;background:#e6f6ee;color:#14643e}.notice.error{background:#fff0ec;color:#9a3412}.empty{padding:45px;background:#fff;border:1px solid var(--line);border-radius:20px;text-align:center;color:var(--muted)}footer{border-top:1px solid var(--line);padding:25px 0;color:var(--muted);font-size:13px}
+:root{--brand:<?= $escape($color) ?>;--accent:<?= $escape($accent) ?>;--ink:<?= $escape($ink) ?>;--muted:<?= $escape($muted) ?>;--line:color-mix(in srgb,var(--ink) 16%,transparent);--surface:<?= $escape($surface) ?>;--page-bg:<?= $escape($background) ?>;--hero:<?= $escape($hero) ?>;--header:<?= $escape($header) ?>;--footer:<?= $escape($footer) ?>;--radius:<?= $radius ?>px;--page-width:<?= $width ?>px}
+*{box-sizing:border-box}body{margin:0;font:16px/1.55 <?= $font ?>;color:var(--ink);background:var(--page-bg)}
+.wrap{max-width:var(--page-width);margin:auto;padding:0 22px}.top{background:var(--header);border-bottom:1px solid var(--line)}.top .wrap{display:flex;align-items:center;justify-content:space-between;padding-top:15px;padding-bottom:15px}.brand{font-size:18px;font-weight:800;letter-spacing:-.03em}.top a{color:var(--brand);font-weight:700;text-decoration:none}
+.hero{background:radial-gradient(circle at 85% 10%,color-mix(in srgb,var(--accent) 35%,transparent),transparent 26%),linear-gradient(125deg,var(--hero),var(--brand));color:#fff;padding:78px 0 84px}.eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;font-weight:800;opacity:.82}.hero h1{font-size:clamp(38px,6vw,68px);line-height:1.05;letter-spacing:-.055em;max-width:800px;margin:15px 0 20px}.hero p{max-width:670px;font-size:18px;opacity:.9;margin:0}.intro{padding:45px 0 24px}.intro h2{font-size:28px;letter-spacing:-.03em;margin:0 0 7px}.intro p{color:var(--muted);margin:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:22px;padding-bottom:80px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;box-shadow:0 18px 45px #1932510d}.stripe{height:7px;background:var(--accent)}.content{padding:27px}.date{display:inline-block;font-size:13px;font-weight:800;color:var(--brand);background:color-mix(in srgb,var(--brand) 12%,white);border-radius:999px;padding:6px 12px}.card h3{font-size:24px;line-height:1.2;letter-spacing:-.035em;margin:19px 0 10px}.desc{white-space:pre-line;color:var(--muted);min-height:48px}.facts{list-style:none;padding:0;margin:21px 0;display:grid;gap:9px}.facts li{display:flex;gap:10px;color:var(--ink)}.facts strong{min-width:88px}.seats{color:#0f766e;font-size:13px;font-weight:700}.full{color:#b45309}.enroll{border-top:1px solid var(--line);padding-top:19px}.enroll summary{cursor:pointer;list-style:none;background:var(--brand);color:#fff;text-align:center;border-radius:var(--radius);padding:12px;font-weight:800}.enroll summary::-webkit-details-marker{display:none}.enroll[open] summary{margin-bottom:18px}.form{display:grid;grid-template-columns:1fr 1fr;gap:13px}.form .wide{grid-column:1/-1}.form label{display:block;font-size:13px;font-weight:700;margin-bottom:5px}.form input:not([type=checkbox]){width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff}.form input:focus{outline:2px solid var(--brand);outline-offset:2px}.check{display:flex;gap:9px;align-items:flex-start;font-size:13px;color:var(--muted)}.check input{margin-top:4px}.submit{border:0;background:var(--brand);color:#fff;border-radius:var(--radius);padding:12px 18px;font:inherit;font-weight:800;cursor:pointer;width:100%}.notice{padding:15px 18px;margin:25px 0 0;border-radius:12px;background:#e6f6ee;color:#14643e}.notice.error{background:#fff0ec;color:#9a3412}.empty{padding:45px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);text-align:center;color:var(--muted)}footer{border-top:1px solid var(--line);background:var(--footer);color:#fff;padding:25px 0;font-size:13px}
+body[data-layout=center] .hero .wrap{text-align:center}body[data-layout=center] .hero h1,body[data-layout=center] .hero p{margin-left:auto;margin-right:auto}body[data-layout=compact] .hero{padding:46px 0 52px}body[data-layout=compact] .hero h1{font-size:clamp(32px,5vw,52px)}body[data-cards=minimal] .card{box-shadow:none}body[data-cards=outlined] .card{box-shadow:none;border-width:2px}body[data-template=events] .hero{background:radial-gradient(circle at 80% 20%,color-mix(in srgb,var(--accent) 45%,transparent),transparent 35%),linear-gradient(135deg,var(--hero),var(--brand));border-bottom:8px solid var(--accent)}body[data-template=events] .date{border-radius:var(--radius)}
 @media(max-width:560px){.hero{padding:55px 0 65px}.form{grid-template-columns:1fr}.form .wide{grid-column:auto}.content{padding:21px}}
 </style>
 </head>
-<body>
-<header class="top"><div class="wrap"><div class="brand">Eventos</div><a href="#agenda">Ver agenda ↓</a></div></header>
+<body data-template="<?= $escape($preset) ?>" data-layout="<?= $escape($layout) ?>" data-cards="<?= $escape($cards) ?>">
+<header class="top"><div class="wrap"><div class="brand"><?= $escape($brand) ?></div><a href="#agenda">Ver agenda ↓</a></div></header>
 <main>
 <section class="hero"><div class="wrap"><div class="eyebrow">Encuentros · Charlas · Experiencias</div><h1><?= $escape($title) ?></h1><p><?= $escape($page['introduction'] ?? '') ?></p></div></section>
 <div class="wrap" id="agenda">

@@ -17,6 +17,7 @@ use App\Services\CustomerRegistrationService;
 use App\Services\SpaAppointmentService;
 use App\Services\SpaLandingService;
 use App\Services\EventRegistrationService;
+use App\Services\StorefrontService;
 use App\Services\SpaScheduleService;
 use App\Services\PdfService;
 use App\Core\PortalAuth;
@@ -59,6 +60,7 @@ final class ApiController
         private SystemRuntimeService $runtime,
         private ClientOnboardingService $onboarding,
         private EventRegistrationService $events,
+        private StorefrontService $storefronts,
     ) {
     }
 
@@ -1048,6 +1050,7 @@ final class ApiController
         header('Content-Security-Policy: default-src \'none\'; style-src \'unsafe-inline\'; form-action \'self\'; base-uri \'none\'');
         header('Content-Type: text/html; charset=UTF-8');
         $page = null;
+        $website = [];
         $events = [];
         $registered = !$submit && ($_GET['inscrito'] ?? '') === '1';
         $error = '';
@@ -1056,6 +1059,7 @@ final class ApiController
             $project = $this->projects->findActiveBySlug($slug);
             $page = $this->events->page($project);
             if (!$page['enabled']) throw new \RuntimeException('Página no disponible.', 404);
+            $website = $this->storefronts->findForProject($project['uid']);
             if ($submit) {
                 $this->events->register($project, Http::input(), true);
                 header('Location: /eventos/' . rawurlencode($slug) . '?inscrito=1#agenda', true, 303);
