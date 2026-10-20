@@ -1047,12 +1047,14 @@ final class ApiController
         header('Cache-Control: no-store');
         header('Referrer-Policy: no-referrer');
         header('X-Content-Type-Options: nosniff');
-        header('Content-Security-Policy: default-src \'none\'; img-src \'self\'; style-src \'unsafe-inline\'; form-action \'self\'; base-uri \'none\'');
+        header('Content-Security-Policy: default-src \'none\'; img-src \'self\' https:; style-src \'unsafe-inline\'; frame-src https://www.openstreetmap.org https://www.google.com; form-action \'self\'; base-uri \'none\'');
         header('Content-Type: text/html; charset=UTF-8');
         $page = null;
         $website = [];
         $events = [];
-        $registered = !$submit && ($_GET['inscrito'] ?? '') === '1';
+        $registration = !$submit ? ($_SESSION['event_registration_success'] ?? null) : null;
+        if (!is_array($registration) || ($registration['slug'] ?? '') !== $slug || time() - (int) ($registration['created_at'] ?? 0) > 3600) $registration = null;
+        $registered = $registration !== null;
         $error = '';
         try {
             $this->keys->rateLimitPublic('events-page:' . hash('sha256', $slug . ':' . Http::clientIp()), 30);
@@ -1061,8 +1063,10 @@ final class ApiController
             if (!$page['enabled']) throw new \RuntimeException('Página no disponible.', 404);
             $website = $this->storefronts->findForProject($project['uid']);
             if ($submit) {
-                $this->events->register($project, Http::input(), true);
-                header('Location: /eventos/' . rawurlencode($slug) . '?inscrito=1#agenda', true, 303);
+                $input = Http::input();
+                $result = $this->events->register($project, $input, true);
+                $_SESSION['event_registration_success'] = ['slug' => $slug, 'created_at' => time(), 'name' => trim((string) ($input['name'] ?? '')), 'email' => trim((string) ($input['email'] ?? ''))] + $result;
+                header('Location: /eventos/' . rawurlencode($slug) . '#confirmacion', true, 303);
                 return;
             }
             $events = $this->events->list($project, true);

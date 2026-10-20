@@ -10,7 +10,7 @@ use RuntimeException;
 
 final class MailService
 {
-    private const TEMPLATES = ['test', 'otp', 'invoice', 'weekly_summary', 'cash_closing', 'license', 'system_event', 'storefront_order', 'onboarding_welcome'];
+    private const TEMPLATES = ['test', 'otp', 'invoice', 'weekly_summary', 'cash_closing', 'license', 'system_event', 'storefront_order', 'onboarding_welcome', 'event_registration'];
 
     public function __construct(private PDO $db, private array $config, private LogService $logs, private string $storage)
     {
@@ -307,6 +307,9 @@ final class MailService
         if ($template === 'onboarding_welcome') {
             return $this->renderOnboardingWelcome($data);
         }
+        if ($template === 'event_registration') {
+            return $this->renderEventRegistration($data);
+        }
 
         $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $company = $escape($data['company_name'] ?? 'TMPBase');
@@ -329,6 +332,36 @@ final class MailService
         }
         $html = '<!doctype html><html><body style="font-family:Arial,sans-serif;background:#f8fafc;padding:24px"><div style="max-width:640px;margin:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden"><div style="background:#0f172a;color:#fff;padding:22px"><h1 style="margin:0;font-size:22px">' . $subject . '</h1></div><table style="width:100%;border-collapse:collapse">' . $content . '</table><p style="padding:18px;color:#64748b;font-size:12px">Mensaje enviado de forma segura por TMPBase.</p></div></body></html>';
         $text = $subject . "\n\n" . implode("\n", array_map(static fn ($key, $value): string => is_scalar($value) ? str_replace('_', ' ', (string) $key) . ': ' . (string) $value : '', array_keys($data), $data));
+        return [$subject, $html, $text];
+    }
+
+    private function renderEventRegistration(array $data): array
+    {
+        $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $title = trim((string) ($data['event_title'] ?? 'Evento')) ?: 'Evento';
+        $company = trim((string) ($data['company_name'] ?? 'Organizador')) ?: 'Organizador';
+        $name = trim((string) ($data['participant_name'] ?? 'Participante')) ?: 'Participante';
+        $date = trim((string) ($data['event_date'] ?? ''));
+        $time = trim((string) ($data['event_time'] ?? ''));
+        $venue = trim((string) ($data['venue'] ?? ''));
+        $room = trim((string) ($data['room'] ?? ''));
+        $mapUrl = trim((string) ($data['map_url'] ?? ''));
+        $subject = mb_substr('Inscripción confirmada: ' . $title, 0, 180);
+        $location = trim($venue . ($room !== '' ? ' · ' . $room : ''));
+        $row = static fn (string $label, string $value): string => '<tr><th style="text-align:left;padding:13px 0;color:#64748b;font-size:13px;font-weight:600;vertical-align:top;width:92px">' . $escape($label) . '</th><td style="padding:13px 0;color:#0f172a;font-size:14px;border-bottom:1px solid #e2e8f0">' . $escape($value) . '</td></tr>';
+        $details = $row('Evento', $title) . $row('Fecha', $date) . $row('Hora', $time) . $row('Lugar', $location);
+        $mapLink = filter_var($mapUrl, FILTER_VALIDATE_URL) && str_starts_with($mapUrl, 'https://')
+            ? '<p style="margin:28px 0 0"><a href="' . $escape($mapUrl) . '" style="display:inline-block;background:#174ea6;color:#fff;padding:13px 19px;border-radius:8px;text-decoration:none;font-weight:700">Ver ubicación en el mapa</a></p>'
+            : '';
+        $html = '<!doctype html><html lang="es"><body style="margin:0;padding:28px;background:#f2f5f9;font-family:Arial,sans-serif;color:#0f172a">'
+            . '<div style="max-width:620px;margin:auto;background:#fff;border:1px solid #dce5ee;border-radius:16px;overflow:hidden">'
+            . '<div style="background:#12366b;color:#fff;padding:30px"><div style="font-size:12px;letter-spacing:1.6px;text-transform:uppercase;color:#a8d5ff">' . $escape($company) . '</div>'
+            . '<h1 style="margin:14px 0 4px;font-size:26px;line-height:1.2">Tu inscripción está confirmada</h1></div>'
+            . '<div style="padding:30px"><p style="margin:0 0 20px;line-height:1.6">Hola, <strong>' . $escape($name) . '</strong>. Reservamos tu lugar. Estos son los datos para asistir:</p>'
+            . '<table role="presentation" style="width:100%;border-collapse:collapse">' . $details . '</table>' . $mapLink
+            . '<p style="margin:28px 0 0;color:#64748b;font-size:13px;line-height:1.5">Conserva este mensaje como comprobante de tu inscripción.</p></div></div></body></html>';
+        $text = "Hola, $name. Tu inscripción a $title está confirmada.\nFecha: $date\nHora: $time\nLugar: $location"
+            . ($mapLink !== '' ? "\nMapa: $mapUrl" : '') . "\nConserva este correo como comprobante de inscripción.";
         return [$subject, $html, $text];
     }
 

@@ -13,7 +13,7 @@ use RuntimeException;
 
 final class EventRegistrationService
 {
-    public function __construct(private PDO $db, private array $config, private ?SchemaService $schema = null)
+    public function __construct(private PDO $db, private array $config, private ?SchemaService $schema = null, private ?MailService $mail = null)
     {
         $this->db->exec("CREATE TABLE IF NOT EXISTS event_pages (
             project_uid TEXT PRIMARY KEY REFERENCES projects(uid) ON DELETE CASCADE,
@@ -41,7 +41,7 @@ final class EventRegistrationService
         )");
         $this->db->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_event_participant_email ON event_participants(event_uid, email)');
         $this->db->exec('CREATE INDEX IF NOT EXISTS idx_event_participants_event ON event_participants(event_uid, status)');
-        $this->addColumns('events', ['image' => "TEXT NOT NULL DEFAULT ''"]);
+        $this->addColumns('events', ['image' => "TEXT NOT NULL DEFAULT ''", 'map_url' => "TEXT NOT NULL DEFAULT ''"]);
         $this->addColumns('event_pages', [
             'eyebrow' => "TEXT NOT NULL DEFAULT ''", 'hero_image' => "TEXT NOT NULL DEFAULT ''",
             'about_title' => "TEXT NOT NULL DEFAULT ''", 'about_text' => "TEXT NOT NULL DEFAULT ''",
@@ -62,6 +62,28 @@ final class EventRegistrationService
         $image = trim((string) ($input[$key] ?? $fallback));
         if ($image !== '' && !preg_match('/^fil_[A-Za-z0-9_-]{1,100}$/', $image)) throw new InvalidArgumentException('Imagen no válida. Súbela desde TMPOS.');
         return $image;
+    }
+
+    private function mapUrl(array $input, string $fallback = ''): string
+    {
+        $url = trim((string) ($input['map_url'] ?? $fallback));
+        if ($url === '') return '';
+        if (strlen($url) > 2048 || !filter_var($url, FILTER_VALIDATE_URL)) throw new InvalidArgumentException('Enlace del mapa no válido.');
+        $parts = parse_url($url);
+        if (!is_array($parts) || strtolower((string) ($parts['scheme'] ?? '')) !== 'https' || isset($parts['user']) || isset($parts['pass'])) {
+            throw new InvalidArgumentException('El mapa debe usar un enlace HTTPS público.');
+        }
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $path = (string) ($parts['path'] ?? '');
+        if (in_array($host, ['google.com', 'www.google.com', 'maps.google.com'], true) && str_starts_with($path, '/maps')) return $url;
+        if ($host === 'maps.app.goo.gl' || ($host === 'goo.gl' && str_starts_with($path, '/maps/'))) return $url;
+        if (in_array($host, ['openstreetmap.org', 'www.openstreetmap.org'], true) && ($path === '' || $path === '/')) {
+            parse_str((string) ($parts['query'] ?? ''), $query);
+            $lat = filter_var($query['mlat'] ?? null, FILTER_VALIDATE_FLOAT);
+            $lon = filter_var($query['mlon'] ?? null, FILTER_VALIDATE_FLOAT);
+            if ($lat !== false && $lat >= -90 && $lat <= 90 && $lon !== false && $lon >= -180 && $lon <= 180) return $url;
+        }
+        throw new InvalidArgumentException('Usa un enlace público de Google Maps o una ubicación seleccionada de OpenStreetMap.');
     }
 
     private function localNow(array $project): string
@@ -139,20 +161,21 @@ final class EventRegistrationService
         try {
             $current = $uid !== '' ? $this->event($project, $uid) : null;
             $image = $this->image($input, 'image', (string) ($current['image'] ?? ''));
+            $mapUrl = $this->mapUrl($input, (string) ($current['map_url'] ?? ''));
             if ($capacity !== null && $current && $capacity < $this->present($current)['registered']) throw new InvalidArgumentException('No puedes reducir los cupos por debajo de los inscritos.');
             if ($current) {
-                $this->db->prepare('UPDATE events SET title=?, description=?, image=?, speaker=?, event_date=?, event_time=?, venue=?, room=?, capacity=?, published=?, registration_open=?, updated_at=? WHERE uid=? AND project_uid=?')
-                    ->execute([$title, $description, $image, $speaker, $date, $time, $venue, $room, $capacity, $published, $open, $now, $uid, $project['uid']]);
+                $this->db->prepare('UPDATE events SET title=?, description=?, image=?, speaker=?, event_date=?, event_time=?, venue=?, room=?, map_url=?, capacity=?, published=?, registration_open=?, updated_at=? WHERE uid=? AND project_uid=?')
+                    ->execute([$title, $description, $image, $speaker, $date, $time, $venue, $room, $mapUrl, $capacity, $published, $open, $now, $uid, $project['uid']]);
             } else {
                 $uid = Support::uid('evt_');
-                $this->db->prepare('INSERT INTO events(uid,project_uid,title,description,image,speaker,event_date,event_time,venue,room,capacity,published,registration_open,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-                    ->execute([$uid, $project['uid'], $title, $description, $image, $speaker, $date, $time, $venue, $room, $capacity, $published, $open, $now, $now]);
+                $this->db->prepare('INSERT INTO events(uid,project_uid,title,description,image,speaker,event_date,event_time,venue,room,map_url,capacity,published,registration_open,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+                    ->execute([$uid, $project['uid'], $title, $description, $image, $speaker, $date, $time, $venue, $room, $mapUrl, $capacity, $published, $open, $now, $now]);
             }
             $saved = $this->present($this->event($project, $uid));
-            $this->db->commit();
+            $this->db->exec('COMMIT');
             return $saved;
         } catch (\Throwable $error) {
-            if ($this->db->inTransaction()) $this->db->rollBack();
+            try { $this->db->exec('ROLLBACK'); } catch (\Throwable) { /* La transacción ya se cerró. */ }
             throw $error;
         }
     }
@@ -174,10 +197,10 @@ final class EventRegistrationService
             $participants->execute([$uid, $project['uid']]);
             $deletedParticipants = $participants->rowCount();
             $this->db->prepare('DELETE FROM events WHERE uid=? AND project_uid=?')->execute([$uid, $project['uid']]);
-            $this->db->commit();
+            $this->db->exec('COMMIT');
             return ['deleted' => true, 'participants_deleted' => $deletedParticipants];
         } catch (\Throwable $error) {
-            if ($this->db->inTransaction()) $this->db->rollBack();
+            try { $this->db->exec('ROLLBACK'); } catch (\Throwable) { /* La transacción ya se cerró. */ }
             throw $error;
         }
     }
@@ -219,12 +242,46 @@ final class EventRegistrationService
                 $this->db->prepare('INSERT INTO event_participants(uid,project_uid,event_uid,name,email,phone,organization,status,source,consent_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
                     ->execute([$participantUid, $project['uid'], $uid, $name, $email, $phone, $organization, 'CONFIRMADO', $public ? 'WEB' : 'MANUAL', $public ? $now : null, $now, $now]);
             }
-            $this->db->commit();
-            return ['uid' => $participantUid, 'event_uid' => $uid, 'status' => 'CONFIRMADO'];
+            $this->db->exec('COMMIT');
         } catch (\Throwable $error) {
-            if ($this->db->inTransaction()) $this->db->rollBack();
+            try { $this->db->exec('ROLLBACK'); } catch (\Throwable) { /* La transacción ya se cerró. */ }
             throw $error;
         }
+        $emailStatus = 'unavailable';
+        $emailMessage = 'Tu inscripción está confirmada. La confirmación por correo no está disponible en este momento.';
+        if ($this->mail) {
+            try {
+                $job = $this->mail->queue((string) $project['uid'], 'event_registration', $email, [
+                    'company_name' => (string) ($project['name'] ?? 'Organizador'),
+                    'participant_name' => $name,
+                    'event_title' => (string) $event['title'],
+                    'event_date' => (string) $event['event_date'],
+                    'event_time' => (string) $event['event_time'],
+                    'venue' => (string) $event['venue'],
+                    'room' => (string) $event['room'],
+                    'map_url' => (string) ($event['map_url'] ?? ''),
+                ]);
+                $delivery = $this->mail->deliver((string) $project['uid'], (string) $job['uid']);
+                $emailStatus = (string) ($delivery['status'] ?? 'pending');
+                $emailMessage = match ($emailStatus) {
+                    'sent' => 'Enviamos los detalles de tu inscripción a ' . $email . '.',
+                    'failed' => 'Tu inscripción está confirmada. No pudimos entregar el correo todavía; el sistema intentará enviarlo de nuevo.',
+                    default => 'Tu inscripción está confirmada. El correo está pendiente de entrega; revisa tu bandeja más tarde.',
+                };
+            } catch (\Throwable) {
+                // Un fallo de SMTP o de cola nunca deshace una reserva confirmada.
+            }
+        }
+        return [
+            'uid' => $participantUid, 'event_uid' => $uid, 'status' => 'CONFIRMADO',
+            'email_status' => $emailStatus, 'email_message' => $emailMessage,
+            'event_title' => (string) $event['title'],
+            'event_date' => (string) $event['event_date'],
+            'event_time' => (string) $event['event_time'],
+            'venue' => (string) $event['venue'],
+            'room' => (string) $event['room'],
+            'map_url' => (string) ($event['map_url'] ?? ''),
+        ];
     }
 
     public function attendance(array $project, string $uid, string $status): array
@@ -240,9 +297,9 @@ final class EventRegistrationService
                 if ($event['remaining'] !== null && $event['remaining'] < 1) throw new RuntimeException('No quedan cupos.', 409);
             }
             $this->db->prepare('UPDATE event_participants SET status=?,updated_at=? WHERE uid=? AND project_uid=?')->execute([$status, Support::now(), $uid, $project['uid']]);
-            $this->db->commit();
+            $this->db->exec('COMMIT');
         } catch (\Throwable $error) {
-            if ($this->db->inTransaction()) $this->db->rollBack();
+            try { $this->db->exec('ROLLBACK'); } catch (\Throwable) { /* La transacción ya se cerró. */ }
             throw $error;
         }
         return ['updated' => true];

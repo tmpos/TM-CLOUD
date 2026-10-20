@@ -86,7 +86,7 @@ final class App
         $customerRegistrations = new CustomerRegistrationService($db, $config, $logs, $schema, $records, $webhooks);
         $spaAppointments = new SpaAppointmentService($db, $config, $logs, $schema, $records, $webhooks);
         $spaLanding = new SpaLandingService($db, $config, $records);
-        $events = new EventRegistrationService($db, $config, $schema);
+        $events = new EventRegistrationService($db, $config, $schema, $mail);
         $storefronts = new StorefrontService($db, $config, $projects, $schema, $records);
         $credentialCipher = new CredentialCipher($config['storage']);
         $storefrontCommerce = new StorefrontCommerceService($db, $config, $credentialCipher, $storefronts, $logs);

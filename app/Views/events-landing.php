@@ -30,6 +30,40 @@ $imageUrl = static function (mixed $uid) use ($config, $project): string {
     return rtrim((string) ($config['url'] ?? ''), '/') . '/api/' . rawurlencode((string) $project['uid']) . '/storage/' . rawurlencode((string) $uid);
 };
 $heroImage = $imageUrl($page['hero_image'] ?? '');
+$mapEmbed = static function (mixed $value, string $venue = ''): string {
+    $url = trim((string) $value);
+    if ($url === '') return '';
+    $parts = parse_url($url);
+    if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https') return '';
+    $host = strtolower((string) ($parts['host'] ?? ''));
+    if (in_array($host, ['openstreetmap.org', 'www.openstreetmap.org'], true)) {
+        parse_str((string) ($parts['query'] ?? ''), $query);
+        $lat = filter_var($query['mlat'] ?? null, FILTER_VALIDATE_FLOAT);
+        $lon = filter_var($query['mlon'] ?? null, FILTER_VALIDATE_FLOAT);
+        if ($lat === false || $lon === false || $lat < -90 || $lat > 90 || $lon < -180 || $lon > 180) return '';
+        $bbox = implode(',', [$lon - .008, $lat - .005, $lon + .008, $lat + .005]);
+        return 'https://www.openstreetmap.org/export/embed.html?bbox=' . rawurlencode($bbox) . '&layer=mapnik&marker=' . rawurlencode($lat . ',' . $lon);
+    }
+    if (in_array($host, ['google.com', 'www.google.com', 'maps.google.com', 'maps.app.goo.gl', 'goo.gl'], true)) {
+        $path = (string) ($parts['path'] ?? '');
+        if (preg_match('/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/', $path, $match)) {
+            $lat = (float) $match[1]; $lon = (float) $match[2];
+            if ($lat >= -90 && $lat <= 90 && $lon >= -180 && $lon <= 180) return 'https://www.google.com/maps?q=' . rawurlencode($lat . ',' . $lon) . '&output=embed';
+        }
+        return $venue !== '' ? 'https://www.google.com/maps?q=' . rawurlencode($venue) . '&output=embed' : '';
+    }
+    return '';
+};
+$coverMode = in_array(($website['hero_background_mode'] ?? ''), ['color', 'image', 'carousel'], true)
+    ? (string) $website['hero_background_mode'] : 'gradient';
+$coverImages = is_array($website['hero_images'] ?? null)
+    ? array_values(array_filter($website['hero_images'], static fn (mixed $url): bool => is_string($url) && (bool) preg_match('#^(?:https://|/(?:api|storage)/)#i', $url)))
+    : [];
+if (in_array($coverMode, ['image', 'carousel'], true) && !$coverImages) $coverMode = 'gradient';
+$coverOpacity = max(0, min(85, (int) ($website['hero_overlay_opacity'] ?? 55))) / 100;
+$coverInterval = max(3000, min(15000, (int) ($website['hero_carousel_interval'] ?? 6000)));
+$coverIsCarousel = $coverMode === 'carousel' && count($coverImages) > 1;
+$coverCount = count($coverImages);
 $highlights = array_slice(array_values(array_filter(array_map('trim', preg_split('/\R/u', (string) ($page['highlights'] ?? '')) ?: []))), 0, 6);
 $next = $events[0] ?? null;
 ?>
@@ -48,14 +82,32 @@ body[data-layout=center] .hero .wrap{text-align:center}body[data-layout=center] 
 .top .wrap{min-height:72px}.brand{display:flex;align-items:center;gap:12px}.brand::before{content:'✦';display:inline-grid;place-items:center;width:36px;height:36px;border-radius:12px;background:var(--brand);color:#fff;font-size:20px}.top a{display:inline-flex;align-items:center;gap:8px}.hero{padding:92px 0 100px;position:relative;overflow:hidden}.hero:after{content:'';position:absolute;right:-110px;bottom:-220px;width:480px;height:480px;border:1px solid #ffffff30;border-radius:50%;pointer-events:none}.hero-grid{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(330px,.88fr);align-items:center;gap:64px;position:relative;z-index:1}.hero-copy{max-width:700px}.hero h1{font-size:clamp(43px,5.8vw,78px);line-height:1.02}.hero p{line-height:1.7}.hero-actions{display:flex;flex-wrap:wrap;gap:15px;align-items:center;margin-top:33px}.hero-button{display:inline-flex;align-items:center;justify-content:center;min-height:52px;background:var(--accent);color:var(--hero);border-radius:999px;padding:12px 25px;font-weight:850;text-decoration:none}.hero-meta{font-size:13px;font-weight:650;opacity:.85}.hero-visual{position:relative;min-height:420px;border:1px solid #ffffff40;border-radius:calc(var(--radius) + 10px);overflow:hidden;box-shadow:0 36px 80px #0005;background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 32%,var(--hero)),var(--brand))}.hero-visual img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.hero-visual:after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 40%,#061325d9)}.hero-caption{position:absolute;left:28px;right:28px;bottom:27px;z-index:1}.hero-caption small{display:block;letter-spacing:.15em;text-transform:uppercase;font-size:11px;font-weight:850;color:var(--accent)}.hero-caption strong{display:block;font-size:23px;line-height:1.2;margin-top:7px}.hero-caption span{display:block;margin-top:6px;font-size:14px;opacity:.88}.hero-art{position:absolute;inset:0;display:grid;place-items:center;font-size:130px;font-weight:200;opacity:.13}.about{padding:75px 0 45px}.section-kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;font-weight:850;color:var(--brand)}.about-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,.9fr);gap:65px;align-items:start}.about h2,.intro h2{font-size:clamp(28px,3vw,42px);line-height:1.15;letter-spacing:-.04em;margin:9px 0 15px}.about p{color:var(--muted);white-space:pre-line;line-height:1.75;margin:0}.highlights{display:grid;gap:11px}.highlight{display:flex;gap:14px;align-items:flex-start;border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:16px 19px;font-weight:700;box-shadow:0 8px 24px #19325108}.highlight:before{content:'✓';display:grid;place-items:center;flex:none;width:23px;height:23px;border-radius:50%;background:color-mix(in srgb,var(--brand) 15%,white);color:var(--brand);font-size:14px}.intro{padding-top:60px;padding-bottom:26px}.intro p{max-width:620px}.card-image{display:block;width:100%;height:225px;object-fit:cover}.card-placeholder{height:175px;background:linear-gradient(135deg,color-mix(in srgb,var(--brand) 77%,var(--hero)),var(--hero));display:flex;align-items:end;padding:22px;color:#fff;font-size:12px;letter-spacing:.15em;text-transform:uppercase;font-weight:800}.card .content{padding:27px}.card h3{font-size:27px}.facts{padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.facts strong{color:var(--muted);font-size:13px}.seats{margin-bottom:19px}.empty{margin-bottom:70px}
 @media(max-width:850px){.hero-grid,.about-grid{grid-template-columns:1fr;gap:35px}.hero{padding:65px 0 75px}.hero-visual{min-height:340px}.about{padding-top:55px}body[data-layout=center] .hero .wrap{text-align:left}}
 @media(max-width:560px){.hero{padding:55px 0 65px}.form{grid-template-columns:1fr}.form .wide{grid-column:auto}.content{padding:21px}}
+.hero-cover{position:absolute;inset:0;z-index:0;overflow:hidden}.hero-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.hero-cover:after{content:'';position:absolute;inset:0;background:#081525;opacity:var(--cover-opacity)}body[data-cover=color] .hero{background:var(--hero)}.hero-cover img.cover-slide{opacity:0;animation:cover-fade linear infinite}@keyframes cover-fade{0%,<?= $coverIsCarousel ? max(0, 100 / $coverCount - 1) : 0 ?>%{opacity:1}<?= $coverIsCarousel ? 100 / $coverCount : 0 ?>%,100%{opacity:0}}@media(prefers-reduced-motion:reduce){.hero-cover img.cover-slide{animation:none;opacity:0}.hero-cover img.cover-slide:first-child{opacity:1}}
+.event-map{margin:18px 0 20px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--page-bg)}.event-map iframe{display:block;width:100%;height:220px;border:0}.event-map a{display:block;padding:10px 14px;color:var(--brand);font-size:13px;font-weight:800;text-decoration:none}.event-map a:hover{text-decoration:underline}
+.registration-success{max-width:900px;margin:32px auto 8px;padding:clamp(24px,4vw,42px);border-radius:24px;background:var(--surface);box-shadow:0 22px 60px #1932511c;border:1px solid var(--line)}.registration-success .success-icon{display:grid;place-items:center;width:58px;height:58px;border-radius:18px;background:#dcfce7;color:#15803d;font-size:30px;font-weight:800}.registration-success h2{font-size:clamp(28px,4vw,40px);line-height:1.15;margin:18px 0 8px}.registration-success p{color:var(--muted);margin:8px 0}.registration-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:24px 0}.registration-facts div{padding:14px 16px;border-radius:14px;background:var(--page-bg)}.registration-facts small{display:block;color:var(--muted);font-size:12px}.registration-facts strong{display:block;margin-top:3px}.registration-success .email-note{font-size:14px}.registration-success .event-map{margin-bottom:0}
 </style>
 </head>
-<body data-template="<?= $escape($preset) ?>" data-layout="<?= $escape($layout) ?>" data-cards="<?= $escape($cards) ?>">
+<body data-template="<?= $escape($preset) ?>" data-layout="<?= $escape($layout) ?>" data-cards="<?= $escape($cards) ?>" data-cover="<?= $escape($coverMode) ?>">
 <header class="top"><div class="wrap"><div class="brand"><?= $escape($brand) ?></div><a href="#agenda">Ver agenda ↓</a></div></header>
 <main>
-<section class="hero"><div class="wrap hero-grid"><div class="hero-copy"><div class="eyebrow"><?= $escape(trim((string) ($page['eyebrow'] ?? '')) ?: 'Encuentros · Charlas · Experiencias') ?></div><h1><?= $escape($title) ?></h1><p><?= $escape($page['introduction'] ?? '') ?></p><div class="hero-actions"><a class="hero-button" href="#agenda"><?= $escape(trim((string) ($page['cta_label'] ?? '')) ?: 'Explorar eventos') ?> &rarr;</a><span class="hero-meta"><?= count($events) ?> <?= count($events) === 1 ? 'evento abierto' : 'eventos abiertos' ?> para inscripción</span></div></div><div class="hero-visual"><?php if ($heroImage !== ''): ?><img src="<?= $escape($heroImage) ?>" alt="Portada de <?= $escape($title) ?>"><?php else: ?><div class="hero-art" aria-hidden="true">✦</div><?php endif; ?><div class="hero-caption"><small><?= $next ? 'Próximo encuentro' : 'Tu próxima experiencia' ?></small><strong><?= $escape($next['title'] ?? 'Descubre lo que viene') ?></strong><?php if ($next): ?><span><?= $escape((new DateTimeImmutable($next['event_date']))->format('d/m/Y')) ?> · <?= $escape($next['event_time']) ?> · <?= $escape($next['venue']) ?></span><?php endif; ?></div></div></div></section>
+<section class="hero"><?php if (in_array($coverMode, ['image', 'carousel'], true)): ?><div class="hero-cover" style="--cover-opacity:<?= $coverOpacity ?>"><?php foreach (($coverIsCarousel ? $coverImages : array_slice($coverImages, 0, 1)) as $coverIndex => $coverUrl): ?><img src="<?= $escape($coverUrl) ?>" alt="" aria-hidden="true"<?= $coverIsCarousel ? ' class="cover-slide" style="animation-duration:' . ($coverCount * $coverInterval) . 'ms;animation-delay:' . (($coverIndex - $coverCount) * $coverInterval) . 'ms"' : '' ?>><?php endforeach; ?></div><?php endif; ?><div class="wrap hero-grid"><div class="hero-copy"><div class="eyebrow"><?= $escape(trim((string) ($page['eyebrow'] ?? '')) ?: 'Encuentros · Charlas · Experiencias') ?></div><h1><?= $escape($title) ?></h1><p><?= $escape($page['introduction'] ?? '') ?></p><div class="hero-actions"><a class="hero-button" href="#agenda"><?= $escape(trim((string) ($page['cta_label'] ?? '')) ?: 'Explorar eventos') ?> &rarr;</a><span class="hero-meta"><?= count($events) ?> <?= count($events) === 1 ? 'evento abierto' : 'eventos abiertos' ?> para inscripción</span></div></div><div class="hero-visual"><?php if ($heroImage !== ''): ?><img src="<?= $escape($heroImage) ?>" alt="Portada de <?= $escape($title) ?>"><?php else: ?><div class="hero-art" aria-hidden="true">✦</div><?php endif; ?><div class="hero-caption"><small><?= $next ? 'Próximo encuentro' : 'Tu próxima experiencia' ?></small><strong><?= $escape($next['title'] ?? 'Descubre lo que viene') ?></strong><?php if ($next): ?><span><?= $escape((new DateTimeImmutable($next['event_date']))->format('d/m/Y')) ?> · <?= $escape($next['event_time']) ?> · <?= $escape($next['venue']) ?></span><?php endif; ?></div></div></div></section>
 <div class="wrap" id="agenda">
-<?php if ($registered): ?><div class="notice" role="status"><strong>Inscripción confirmada.</strong> Tu plaza quedó reservada. Conserva los datos del evento.</div><?php endif; ?>
+<?php if ($registered && is_array($registration)): ?>
+<section id="confirmacion" class="registration-success" role="status" aria-labelledby="registration-title">
+  <span class="success-icon" aria-hidden="true">✓</span>
+  <h2 id="registration-title">¡Gracias por inscribirte<?= ($registration['name'] ?? '') !== '' ? ', ' . $escape($registration['name']) : '' ?>!</h2>
+  <p>Tu lugar para <strong><?= $escape($registration['event_title'] ?? 'el evento') ?></strong> quedó reservado. Guarda estos datos para el día del encuentro.</p>
+  <div class="registration-facts">
+    <div><small>Fecha y hora</small><strong><?= $escape(isset($registration['event_date']) ? (new DateTimeImmutable($registration['event_date']))->format('d/m/Y') : '') ?> · <?= $escape($registration['event_time'] ?? '') ?></strong></div>
+    <div><small>Lugar</small><strong><?= $escape($registration['venue'] ?? '') ?><?= ($registration['room'] ?? '') !== '' ? ' · ' . $escape($registration['room']) : '' ?></strong></div>
+    <div><small>Correo registrado</small><strong><?= $escape($registration['email'] ?? '') ?></strong></div>
+  </div>
+  <?php if (($registration['map_url'] ?? '') !== ''): $registrationMap = $mapEmbed($registration['map_url'], (string) ($registration['venue'] ?? '')); ?>
+    <div class="event-map"><?php if ($registrationMap !== ''): ?><iframe src="<?= $escape($registrationMap) ?>" title="Mapa del lugar del evento" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe><?php endif; ?><a href="<?= $escape($registration['map_url']) ?>" target="_blank" rel="noopener noreferrer">Cómo llegar al evento ↗</a></div>
+  <?php endif; ?>
+  <p class="email-note"><?php if (($registration['email_status'] ?? '') === 'sent'): ?>Enviamos la confirmación a tu correo.<?php elseif (($registration['email_status'] ?? '') === 'pending'): ?>La confirmación por correo está en proceso.<?php else: ?>Tu inscripción está confirmada. La confirmación por correo aún no pudo enviarse; conserva esta página como comprobante.<?php endif; ?></p>
+</section>
+<?php endif; ?>
 <?php if ($error !== ''): ?><div class="notice error" role="alert"><?= $escape($error) ?></div><?php endif; ?>
 <?php if (trim((string) ($page['about_title'] ?? '')) !== '' || trim((string) ($page['about_text'] ?? '')) !== '' || $highlights): ?><section class="about"><div class="about-grid"><div><span class="section-kicker">La experiencia</span><h2><?= $escape(trim((string) ($page['about_title'] ?? '')) ?: 'Un encuentro para compartir y aprender') ?></h2><p><?= $escape($page['about_text'] ?? '') ?></p></div><?php if ($highlights): ?><div class="highlights"><?php foreach ($highlights as $highlight): ?><div class="highlight"><?= $escape($highlight) ?></div><?php endforeach; ?></div><?php endif; ?></div></section><?php endif; ?>
 <section class="intro"><h2>Agenda de eventos</h2><p>Elige un evento y completa el formulario para reservar tu lugar.</p></section>
@@ -69,6 +121,7 @@ body[data-layout=center] .hero .wrap{text-align:center}body[data-layout=center] 
 <span class="date"><?= $escape($dateLabel) ?> · <?= $escape($event['event_time']) ?></span>
 <h3><?= $escape($event['title']) ?></h3><p class="desc"><?= nl2br($escape($event['description'])) ?></p>
 <ul class="facts"><li><strong>Expositor</strong><span><?= $escape($event['speaker']) ?></span></li><li><strong>Lugar</strong><span><?= $escape($event['venue']) ?><?= $event['room'] !== '' ? ' · ' . $escape($event['room']) : '' ?></span></li></ul>
+<?php if (($event['map_url'] ?? '') !== ''): $eventMap = $mapEmbed($event['map_url'], (string) ($event['venue'] ?? '')); ?><div class="event-map"><?php if ($eventMap !== ''): ?><iframe src="<?= $escape($eventMap) ?>" title="Mapa de <?= $escape($event['title']) ?>" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe><?php endif; ?><a href="<?= $escape($event['map_url']) ?>" target="_blank" rel="noopener noreferrer">Ver cómo llegar ↗</a></div><?php endif; ?>
 <p class="seats <?= $full ? 'full' : '' ?>"><?= $full ? 'Cupos agotados' : ($event['remaining'] === null ? 'Cupos ilimitados' : $event['remaining'] . ' cupos disponibles') ?></p>
 <?php if (!$full): ?><details class="enroll" <?= $submittedEvent === $event['uid'] && $error !== '' ? 'open' : '' ?>><summary>Inscribirme</summary>
 <form method="post" class="form"><input type="hidden" name="event_uid" value="<?= $escape($event['uid']) ?>">
