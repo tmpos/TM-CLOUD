@@ -34,7 +34,15 @@ final class SalonRuntimeService
     {
         if (in_array($channel,['salon:guardarInsumos','salon:guardarPlanificacion'],true)) {
             self::warehouse($db,(array)($input['warehouse']??[]));
-            return $channel==='salon:guardarInsumos' ? SalonSuppliesStore::save($db,$input,$admin) : SalonPlanningStore::save($db,$input,$admin);
+            if ($channel==='salon:guardarPlanificacion' && isset($input['accountOperation'])) {
+                if (in_array($input['accountOperation']['type']??'',['history','historyDetail'],true)) {
+                    require_once __DIR__.'/SalonInvoiceHistory.php';
+                    return SalonInvoiceHistory::handle($db,$input,$actor,$admin);
+                }
+                require_once __DIR__.'/SalonStationAccounts.php';
+                return SalonStationAccounts::handle($db,$input,$actor,$admin);
+            }
+            return $channel==='salon:guardarInsumos' ? SalonSuppliesStore::save($db,$input,$admin) : SalonPlanningStore::save($db,$input,$admin,$actor);
         }
         $roles = ['admin'=>'administrador','ceo'=>'administrador','administrador'=>'administrador','soporte'=>'soporte','cajero'=>'cajero'];
         $level = strtolower(trim((string)($actor['nivel_seguridad'] ?? '')));
@@ -94,6 +102,10 @@ final class SalonRuntimeService
     /** Called inside the existing atomic invoice transaction, after idempotency lookup. */
     public static function applyDeposit(PDO $db, array $invoice, array $payload): array
     {
+        if (isset(json_decode((string)($invoice['otro']??'{}'),true)['salon_account'])) {
+            require_once __DIR__.'/SalonStationAccounts.php';
+            $invoice=SalonStationAccounts::finish($db,$invoice);
+        }
         $meta=json_decode((string)($invoice['otro']??'{}'),true) ?: [];
         $booking=$meta['salon_booking']??null;
         if (!$booking) return $invoice;
