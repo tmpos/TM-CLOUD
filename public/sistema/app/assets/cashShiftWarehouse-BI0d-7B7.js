@@ -1,0 +1,1 @@
+function e(e,t,n,r){let i=String(e?.almacen_uid||``),a=Number(e?.almacen_id||0);return t&&i?i===t:n&&a?a===n:!i&&!a&&r<=1}export{e as t};
