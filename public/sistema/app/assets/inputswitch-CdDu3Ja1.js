@@ -1,0 +1,1 @@
+import{t as e}from"./toggleswitch-Dd9FlOt4.js";var t={name:`InputSwitch`,extends:e,mounted:function(){console.warn(`Deprecated since v4. Use ToggleSwitch component instead.`)}};export{t};
