@@ -193,6 +193,21 @@ final class SystemController
                 echo '{}';
             }
         });
+        Flight::route('GET /sistema/@slug/offline-sw.js', function ($slug): void {
+            try {
+                $project = $this->projectBySlug((string) $slug);
+                if (!$this->systemUser($project)) throw new \RuntimeException('La sesion expiro.', 401);
+                $app = $this->systemApps->find((string) ($project['system_app'] ?? 'default'));
+                $file = (string) $app['path'] . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'offline-sw.js';
+                if (!is_file($file)) throw new \RuntimeException('La PWA offline no esta publicada.', 404);
+                header('Content-Type: application/javascript; charset=UTF-8');
+                header('Cache-Control: no-store, private');
+                header('Service-Worker-Allowed: /sistema/' . rawurlencode((string) $project['slug']));
+                echo file_get_contents($file);
+            } catch (\Throwable $e) {
+                http_response_code($e->getCode() === 401 ? 401 : 404);
+            }
+        });
         Flight::route('GET /sistema/@slug', $serveApp);
         Flight::route('GET /sistema/@slug/', $serveApp);
         Flight::route('GET /sistema/@slug/*', $serveApp);
@@ -201,6 +216,8 @@ final class SystemController
                 Flight::json(['success' => true, 'data' => [
                     'user' => $systemUser,
                     'project' => ['uid' => $project['uid'], 'slug' => $project['slug'], 'name' => $project['name']],
+                    'realtime_public_key' => $project['public_key'],
+                    'offline_sales_v1' => true,
                     'role' => $systemUser['rol'] ?? $systemUser['nivel_seguridad'] ?? 'usuario',
                     'csrf' => Csrf::token(),
                 ]]);

@@ -1,1 +1,0 @@
-import{P as e,l as t,v as n}from"./runtime-core.esm-bundler-CyLDb3-k.js";import{t as r}from"./CrmWorkspace-CNYda3Uj.js";var i=n({__name:`MisAsignacionesComp`,setup(n){return(n,i)=>(e(),t(r,{personal:``}))}});export{i as default};

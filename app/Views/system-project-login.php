@@ -25,11 +25,31 @@
 </form>
 <script>
 const pin=document.getElementById('pin'),submit=document.getElementById('submit');
+const offlinePinKey=<?= json_encode('tmpos-pwa-pending-pin:' . rawurlencode($slug), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+sessionStorage.removeItem(offlinePinKey);
+document.getElementById('pin-form').addEventListener('submit',()=>sessionStorage.setItem(offlinePinKey,pin.value));
 const sync=()=>{pin.value=pin.value.replace(/\D/g,'').slice(0,4);submit.disabled=pin.value.length!==4};
 pin.addEventListener('input',sync);
 document.querySelectorAll('[data-number]').forEach(button=>button.addEventListener('click',()=>{if(pin.value.length<4)pin.value+=button.dataset.number;sync();pin.focus()}));
 document.getElementById('clear').addEventListener('click',()=>{pin.value='';sync();pin.focus()});
 document.getElementById('backspace').addEventListener('click',()=>{pin.value=pin.value.slice(0,-1);sync();pin.focus()});
+// An online login page replaces the old offline access, but keeps queued sales.
+if ('indexedDB' in window) {
+  const dbRequest = indexedDB.open('tmpos-web-offline-v2', 1);
+  dbRequest.onupgradeneeded = () => {
+    if (!dbRequest.result.objectStoreNames.contains('entries')) dbRequest.result.createObjectStore('entries');
+  };
+  dbRequest.onsuccess = () => {
+    const db = dbRequest.result;
+    if (db.objectStoreNames.contains('entries')) {
+      const tx = db.transaction('entries', 'readwrite');
+      tx.objectStore('entries').delete(<?= json_encode(rawurlencode($slug) . ':session:', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>);
+      tx.objectStore('entries').delete(<?= json_encode(rawurlencode($slug) . ':pin:', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>);
+      tx.oncomplete = () => db.close();
+      tx.onerror = () => db.close();
+    } else db.close();
+  };
+}
 </script>
 </body>
 </html>
