@@ -139,6 +139,21 @@ try {
     if (str_contains($inlineHtml, 'Detalle de productos no disponible')) {
         throw new RuntimeException('Inline invoice products were replaced with the empty detail message.');
     }
+    $posIncludedInvoice = array_replace($inlineInvoice, [
+        'id' => 3, 'uid' => 'pos-included-tax', 'ncf' => '', 'total' => 1220,
+        'subtotal' => 1033.90, 'impuesto_monto' => 186.10,
+        'otro' => json_encode(['pos_tax' => ['mode' => 1, 'rate' => 18]]),
+        'productos' => json_encode([['nombre' => 'PRUEBA DE 1220', 'cantidad' => 1, 'precio' => 1220, 'total' => 1220]]),
+    ]);
+    $posIncludedHtml = $service->invoiceHtml($project, $posIncludedInvoice);
+    if (!preg_match('/PRUEBA DE 1220.*?<td class="num">[^<]*1,220\.00<\/td>.*?<td class="num line-tax">[^<]*186\.10<\/td>.*?<td class="num">[^<]*1,033\.90<\/td>/s', $posIncludedHtml)) {
+        throw new RuntimeException('Included POS tax line must show gross unit price, tax and net subtotal.');
+    }
+    if (!str_contains($posIncludedHtml, '<th style="width:18%">SUBTOTAL</th>')) throw new RuntimeException('Line subtotal heading missing.');
+    $posAddedHtml = $service->invoiceHtml($project, array_replace($posIncludedInvoice, ['otro' => json_encode(['pos_tax' => ['mode' => 0, 'rate' => 18]])]));
+    if (!preg_match('/PRUEBA DE 1220.*?<td class="num">[^<]*1,220\.00<\/td>.*?<td class="num line-tax">[^<]*0\.00<\/td>.*?<td class="num">[^<]*1,220\.00<\/td>/s', $posAddedHtml)) {
+        throw new RuntimeException('Added-tax line was incorrectly treated as included tax.');
+    }
     $tmposInvoice = $inlineInvoice;
     unset($tmposInvoice['estado'], $tmposInvoice['created_at'], $tmposInvoice['descuento_monto'], $tmposInvoice['impuesto_monto'], $tmposInvoice['notas']);
     $tmposInvoice['estado_factura'] = 'ANULADA';

@@ -161,6 +161,29 @@ final class PdfService
         }
         $lineTaxes = isset($invoice['_fiscal_print_payload']) ? FiscalLineTaxes::calculate($invoice['_fiscal_print_payload'], $details) : null;
         $lineTaxes ??= array_map(static fn (array $item): float => (float) ($item['impuesto_venta'] ?? $item['impuesto'] ?? 0) * (float) ($item['cantidad'] ?? 1), $details);
+        $other = $invoice['otro'] ?? [];
+        if (is_string($other)) $other = json_decode($other, true);
+        $savedTaxMode = is_array($other) ? ($other['pos_tax']['mode'] ?? null) : null;
+        $taxMode = (int) ($savedTaxMode ?? $invoice['impuesto_incluido'] ?? 0);
+        $invoiceTax = (float) ($invoice['impuesto_monto'] ?? $invoice['impuesto'] ?? 0);
+        $lineTotals = array_map(static function (array $item): float {
+            $quantity = (float) ($item['cantidad'] ?? 1);
+            $unit = (float) ($item['precio_unitario'] ?? $item['precio'] ?? 0);
+            return (float) ($item['total'] ?? ($quantity * $unit));
+        }, $details);
+        if ($taxMode === 1 && $invoiceTax > 0 && $details
+            && array_sum($lineTaxes) == 0.0 && array_sum($lineTotals) > 0) {
+            $gross = array_sum(array_map(static fn (float $total): float => max(0, $total), $lineTotals));
+            $cents = (int) round($invoiceTax * 100);
+            $cumulative = 0.0;
+            $allocated = 0;
+            foreach ($lineTotals as $index => $lineTotal) {
+                $cumulative += max(0, $lineTotal);
+                $next = (int) round($cents * $cumulative / $gross);
+                $lineTaxes[$index] = ($next - $allocated) / 100;
+                $allocated = $next;
+            }
+        }
         $payments = $this->byForeignReference($project, 'factura_pagos', 'factura_id', $invoice);
 
         $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
