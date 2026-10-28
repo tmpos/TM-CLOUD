@@ -1,0 +1,1 @@
+import{Q as e}from"./basecomponent-Dw3cwOTh.js";var t=e();export{t};

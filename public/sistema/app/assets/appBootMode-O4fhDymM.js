@@ -1,0 +1,1 @@
+function e(e,t,n=!1){if(t)return!0;if(n)return!1;let r=String(e||``).trim().toLowerCase();return r!==`offline`&&r!==`ambos`}export{e as shouldUseOnlineOnly};
