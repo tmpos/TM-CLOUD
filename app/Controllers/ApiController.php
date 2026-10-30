@@ -415,11 +415,25 @@ final class ApiController
         }
         Flight::route('POST /api/@project/mail/send', fn ($project) => $this->runProject($project, true, function ($p): void {
             $input = Http::input();
+            $template = (string) ($input['template'] ?? '');
+            $mailData = is_array($input['data'] ?? null) ? $input['data'] : [];
+            if ($template === 'cash_closing') {
+                $db = $this->schema->connection($p);
+                $sections = [];
+                $hasConfig = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='configuracion'")->fetchColumn();
+                if ($hasConfig) {
+                    $settings = $db->prepare("SELECT valor FROM configuracion WHERE clave = 'cash_closing_email_settings_v1' LIMIT 1");
+                    $settings->execute();
+                    $decoded = json_decode((string) ($settings->fetchColumn() ?: ''), true);
+                    if (is_array($decoded)) $sections = $decoded;
+                }
+                $mailData['email_sections'] = $sections;
+            }
             $job = $this->mail->queue(
                 $p['uid'],
-                (string) ($input['template'] ?? ''),
+                $template,
                 (string) ($input['to'] ?? ''),
-                is_array($input['data'] ?? null) ? $input['data'] : []
+                $mailData
             );
             if (!empty($input['send_now'])) {
                 $job = $this->mail->deliver($p['uid'], (string) $job['uid']);

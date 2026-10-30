@@ -57,7 +57,7 @@ final class SystemRuntimeService
 
     public function isWrite(string $action, array $input): bool
     {
-        if (in_array($action, ['db/insert', 'db/insertMany', 'db/update', 'db/delete', 'db/deleteAll', 'config/set'], true)) return true;
+        if (in_array($action, ['db/insert', 'db/insertMany', 'db/update', 'db/delete', 'db/deleteAll', 'db/setAccessoryStock', 'config/set'], true)) return true;
         if ($action !== 'invoke') return false;
         $channel = (string) ($input['channel'] ?? '');
         if (str_starts_with($channel, 'db:get') || in_array($channel, [
@@ -87,6 +87,7 @@ final class SystemRuntimeService
             'db/insert' => $this->insert($db, $project, $input, $actor),
             'db/insertMany' => $this->insertMany($db, $project, $input, $actor),
             'db/update' => $this->update($db, $project, $input, $actor),
+            'db/setAccessoryStock' => $this->setAccessoryStock($db, $project, $input, $actor),
             'db/delete' => $this->delete($db, $project, $input, $actor),
             'db/deleteAll' => $this->deleteAll($db, $project, $input, $actor),
             'db/bitacoraList' => $this->bitacora($db, (int) ($input['limite'] ?? 1000)),
@@ -204,6 +205,57 @@ final class SystemRuntimeService
         $this->logs->write('system.record.updated', $project['uid'], $tableName, (string) ($old['uid'] ?? $id), $old, ['actor' => $actor['email'] ?? '', 'changes' => $data]);
         $this->webhooks->dispatch('record.updated', $project, $tableName, $this->row($db, $table, $id));
         return ['success' => true, 'data' => ['id' => $id]];
+    }
+
+    private function setAccessoryStock(PDO $db, array $project, array $input, array $actor): array
+    {
+        $entries = $input['entries'] ?? null;
+        if (!is_array($entries) || !$entries || count($entries) > 500) {
+            throw new InvalidArgumentException('El lote debe contener entre 1 y 500 accesorios.');
+        }
+        $table = $this->table($db, 'accesorios');
+        $seen = [];
+        $changes = [];
+        // Obtain the write reservation before comparing quantities, so another
+        // terminal cannot change stock between validation and update.
+        $db->exec('BEGIN IMMEDIATE');
+        try {
+            foreach ($entries as $entry) {
+                if (!is_array($entry)) throw new InvalidArgumentException('Accesorio no valido.');
+                $id = filter_var($entry['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                $uid = trim((string) ($entry['uid'] ?? ''));
+                if (!$id || $uid === '' || isset($seen[$id])) throw new InvalidArgumentException('Identidad de accesorio invalida o duplicada.');
+                $seen[$id] = true;
+                foreach (['quantity', 'expectedQuantity'] as $field) {
+                    if (!isset($entry[$field]) || !is_numeric($entry[$field])) throw new InvalidArgumentException('Cantidad de accesorio invalida.');
+                    $number = (float) $entry[$field];
+                    if (!is_finite($number) || $number < 0 || abs($number - round($number, 3)) > 0.000001) {
+                        throw new InvalidArgumentException('La cantidad debe ser positiva y tener hasta tres decimales.');
+                    }
+                }
+                $old = $this->row($db, $table, (int) $id);
+                if ((string) ($old['uid'] ?? '') !== $uid) throw new RuntimeException('El accesorio ha cambiado. Actualiza la lista.', 409);
+                $current = (float) ($old['cantidad'] ?? 0);
+                if (abs($current - (float) $entry['expectedQuantity']) > 0.000001) {
+                    throw new RuntimeException('El stock de un accesorio cambio. Actualiza la lista antes de guardar.', 409);
+                }
+                $quantity = round((float) $entry['quantity'], 3);
+                if (abs($current - $quantity) < 0.000001) continue;
+                $db->prepare("UPDATE $table SET cantidad=?,updated_at=? WHERE id=?")
+                    ->execute([$quantity, $this->now(), (int) $id]);
+                $this->audit($db, 'accesorios', (int) $id, 'UPDATE', $actor, ['cantidad' => $quantity], $old);
+                $changes[] = ['id' => (int) $id, 'uid' => $uid, 'quantity' => $quantity];
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        foreach ($changes as $change) {
+            $this->logs->write('system.record.updated', $project['uid'], 'accesorios', $change['uid'], null, ['actor' => $actor['email'] ?? '', 'changes' => ['cantidad' => $change['quantity']]]);
+            $this->webhooks->dispatch('record.updated', $project, 'accesorios', $this->row($db, $table, $change['id']));
+        }
+        return ['success' => true, 'changes' => $changes];
     }
 
     private function delete(PDO $db, array $project, array $input, array $actor): array

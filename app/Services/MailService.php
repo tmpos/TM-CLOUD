@@ -493,6 +493,11 @@ final class MailService
 
     private function renderCashClosing(array $data): array
     {
+        $configured = is_array($data['email_sections'] ?? null) ? $data['email_sections'] : [];
+        $enabled = [];
+        foreach (['overview', 'financial', 'sales', 'workshop', 'receivables', 'expenses', 'movements', 'observation'] as $section) {
+            $enabled[$section] = !array_key_exists($section, $configured) || $configured[$section] !== false;
+        }
         $escape = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $money = static fn (mixed $value): string => 'RD$ ' . number_format((float) $value, 2, '.', ',');
         $date = static function (mixed $value) use ($escape): string {
@@ -588,7 +593,7 @@ final class MailService
         $receivablePending = (float) ($data['accounts_receivable_pending'] ?? $data['cuentas_cobrar_pendiente'] ?? $data['receivables_pending'] ?? $receivableCalculatedPending);
 
         $observation = trim((string) ($data['observation'] ?? ''));
-        $observationHtml = $observation === '' ? '' : '<div style="margin-top:22px;padding:14px 16px;background:#fffbeb;border-left:4px solid #f59e0b;border-radius:6px"><strong>Observacion:</strong> ' . $escape($observation) . '</div>';
+        $observationHtml = !$enabled['observation'] || $observation === '' ? '' : '<div style="margin-top:22px;padding:14px 16px;background:#fffbeb;border-left:4px solid #f59e0b;border-radius:6px"><strong>Observacion:</strong> ' . $escape($observation) . '</div>';
         $truncatedHtml = empty($data['details_truncated']) ? '' : '<div style="margin-top:14px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;color:#475569;font-size:12px">El correo muestra hasta 50 registros por seccion. Los totales incluyen todas las operaciones del turno.</div>';
         $html = '<!doctype html><html><body style="margin:0;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;padding:24px"><div style="max-width:780px;margin:auto;background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;box-shadow:0 12px 30px rgba(15,23,42,.08)">'
             . '<div style="padding:28px;background:linear-gradient(135deg,#064e3b,#047857);color:#fff"><div style="font-size:12px;letter-spacing:2px;color:#a7f3d0">REPORTE OFICIAL</div><h1 style="margin:7px 0 5px;font-size:28px">Cierre de caja #' . $shiftId . '</h1><div>' . $escape($company) . ' &bull; ' . $date($data['closed_at'] ?? '') . '</div></div>'
@@ -603,20 +608,35 @@ final class MailService
             . '<h2 style="margin-top:25px;font-size:17px;border-bottom:2px solid #e2e8f0;padding-bottom:8px">Entradas y retiros</h2><table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>' . $movementRows . '</tbody></table>'
             . $observationHtml . $truncatedHtml . '<div style="margin-top:28px;padding-top:18px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;text-align:center">Reporte generado automaticamente por TMPOS y enviado de forma segura por TMPBASE.</div></div></div></body></html>';
 
-        $text = $subject
-            . "\nCajero: " . (string) ($data['cashier'] ?? 'Usuario')
-            . "\nApertura: " . (string) ($data['opened_at'] ?? '-')
-            . "\nCierre: " . (string) ($data['closed_at'] ?? '-')
-            . "\nVentas: " . $money($data['sales_total'] ?? 0)
-            . "\nTaller total: " . $money($workshopTotal)
-            . "\nTaller cobrado: " . $money($workshopPaid)
-            . "\nTaller pendiente: " . $money($workshopPending)
-            . "\nCuentas por cobrar total: " . $money($receivableTotal)
-            . "\nCuentas por cobrar cobrado: " . $money($receivablePaid)
-            . "\nCuentas por cobrar pendiente: " . $money($receivablePending)
-            . "\nEfectivo esperado: " . $money($data['expected_cash'] ?? 0)
-            . "\nEfectivo contado: " . $money($data['counted_cash'] ?? 0)
-            . "\nDiferencia: " . $money($difference);
+        // Each heading starts one optional section. Keep the footer and the
+        // observation even when the final (movements) section is disabled.
+        preg_match_all('/<h2\b[^>]*>.*?<\/h2>/s', $html, $headings, PREG_OFFSET_CAPTURE);
+        $sectionKeys = ['financial', 'sales', 'workshop', 'receivables', 'expenses', 'movements'];
+        if (count($headings[0]) === count($sectionKeys)) {
+            $firstHeading = $headings[0][0][1];
+            if (!$enabled['overview']) {
+                $html = preg_replace('/(<div style="padding:26px">).*$/s', '$1' . substr($html, $firstHeading), $html, 1) ?? $html;
+                preg_match_all('/<h2\b[^>]*>.*?<\/h2>/s', $html, $headings, PREG_OFFSET_CAPTURE);
+            }
+            for ($i = count($sectionKeys) - 1; $i >= 0; $i--) {
+                if ($enabled[$sectionKeys[$i]]) continue;
+                $start = $headings[0][$i][1];
+                $end = $i + 1 < count($sectionKeys)
+                    ? $headings[0][$i + 1][1]
+                    : strpos($html, '<div style="margin-top:28px', $start);
+                if ($end === false) continue;
+                $replacement = $i === count($sectionKeys) - 1 ? $observationHtml . $truncatedHtml : '';
+                $html = substr_replace($html, $replacement, $start, $end - $start);
+            }
+        }
+
+        $text = $subject . "\nCierre: " . (string) ($data['closed_at'] ?? '-');
+        if ($enabled['overview']) $text .= "\nCajero: " . (string) ($data['cashier'] ?? 'Usuario') . "\nApertura: " . (string) ($data['opened_at'] ?? '-');
+        if ($enabled['sales']) $text .= "\nVentas: " . $money($data['sales_total'] ?? 0);
+        if ($enabled['workshop']) $text .= "\nTaller total: " . $money($workshopTotal) . "\nTaller cobrado: " . $money($workshopPaid) . "\nTaller pendiente: " . $money($workshopPending);
+        if ($enabled['receivables']) $text .= "\nCuentas por cobrar total: " . $money($receivableTotal) . "\nCuentas por cobrar cobrado: " . $money($receivablePaid) . "\nCuentas por cobrar pendiente: " . $money($receivablePending);
+        if ($enabled['financial']) $text .= "\nEfectivo esperado: " . $money($data['expected_cash'] ?? 0) . "\nEfectivo contado: " . $money($data['counted_cash'] ?? 0) . "\nDiferencia: " . $money($difference);
+        if ($enabled['observation'] && $observation !== '') $text .= "\nObservacion: " . $observation;
         return [$subject, $html, $text];
     }
 }
