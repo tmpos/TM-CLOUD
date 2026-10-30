@@ -71,8 +71,7 @@ final class SystemController
         Flight::route('GET /sistema/@slug/login', function ($slug): void {
             try {
                 $project = $this->projectBySlug((string) $slug);
-                if ($this->systemUser($project)) { Flight::redirect('/sistema/' . rawurlencode((string) $project['slug'])); return; }
-                $this->render('system-project-login', ['title' => $project['name'], 'project' => $project], false);
+                Flight::redirect('/sistema/' . rawurlencode((string) $project['slug']) . '/#/login');
             } catch (\Throwable $e) {
                 http_response_code($e->getCode() === 404 ? 404 : 400);
                 $this->render('system-project-login', ['title' => 'Sistema no disponible', 'error' => $e->getMessage()], false);
@@ -106,7 +105,6 @@ final class SystemController
         $serveApp = function ($slug): void {
             try {
                 $project = $this->projectBySlug((string) $slug);
-                if (!$this->systemUser($project)) { Flight::redirect('/sistema/' . rawurlencode((string) $project['slug']) . '/login'); return; }
                 $app = $this->systemApps->find((string) ($project['system_app'] ?? 'default'));
                 $file = (string) $app['path'] . DIRECTORY_SEPARATOR . 'index.html';
                 if (!is_file($file)) throw new \RuntimeException('La interfaz TMPOS no esta publicada.', 404);
@@ -197,25 +195,31 @@ final class SystemController
         Flight::route('GET /sistema/@slug/', $serveApp);
         Flight::route('GET /sistema/@slug/*', $serveApp);
         Flight::route('GET /api/system/@slug/session', function ($slug): void {
-            $this->api((string) $slug, function (array $project, array $systemUser): void {
+            $this->api((string) $slug, function (array $project, ?array $systemUser): void {
                 Flight::json(['success' => true, 'data' => [
                     'user' => $systemUser,
                     'project' => ['uid' => $project['uid'], 'slug' => $project['slug'], 'name' => $project['name']],
-                    'role' => $systemUser['rol'] ?? $systemUser['nivel_seguridad'] ?? 'usuario',
+                    'role' => $systemUser['rol'] ?? $systemUser['nivel_seguridad'] ?? null,
                     'csrf' => Csrf::token(),
                 ]]);
-            });
+            }, false);
         });
         Flight::route('POST /api/system/@slug/runtime', function ($slug): void {
-            $this->api((string) $slug, function (array $project, array $systemUser): void {
+            $this->api((string) $slug, function (array $project, ?array $systemUser): void {
                 $input = Http::input();
                 Csrf::verify($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
                 $action = trim((string) ($input['action'] ?? ''));
                 $payload = is_array($input['data'] ?? null) ? $input['data'] : [];
+                if (!$systemUser && !($action === 'invoke' && ($payload['channel'] ?? '') === 'auth:login')) {
+                    throw new \RuntimeException('La sesion expiro.', 401);
+                }
                 if ($action === 'invoke' && ($payload['channel'] ?? '') === 'auth:login') {
                     $credentials = (array) (($payload['args'] ?? [])[0] ?? []);
+                    $this->keys->rateLimitPublic('system-login-project:' . $project['uid'], 30, 900);
+                    $this->keys->rateLimitPublic('system-login:' . hash('sha256', $project['uid'] . '|' . ($_SERVER['REMOTE_ADDR'] ?? '')), 20);
                     $result = $this->runtime->authenticate($project, $credentials);
                     if (!empty($result['success']) && !empty($result['data'])) {
+                        session_regenerate_id(true);
                         $safe = $this->safeUser((array) $result['data']);
                         $_SESSION['system_project_users'][$project['uid']] = $safe;
                         $result['data'] = $safe;
@@ -224,7 +228,7 @@ final class SystemController
                     return;
                 }
                 Flight::json($this->runtime->handle($project, $action, $payload, $systemUser));
-            });
+            }, false);
         });
         Flight::route('POST /api/system/@slug/storage/upload', function ($slug): void {
             $this->api((string) $slug, function (array $project): void {
@@ -253,13 +257,13 @@ final class SystemController
         });
     }
 
-    private function api(string $slug, callable $callback): void
+    private function api(string $slug, callable $callback, bool $requireUser = true): void
     {
         header('Cache-Control: no-store, private');
         try {
             $project = $this->projectBySlug($slug);
             $systemUser = $this->systemUser($project);
-            if (!$systemUser) throw new \RuntimeException('La sesion expiro.', 401);
+            if ($requireUser && !$systemUser) throw new \RuntimeException('La sesion expiro.', 401);
             $callback($project, $systemUser);
         } catch (\Throwable $e) {
             $status = in_array($e->getCode(), [401, 403, 404, 409, 422, 423], true) ? $e->getCode() : 400;

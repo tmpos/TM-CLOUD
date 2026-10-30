@@ -43,10 +43,16 @@ assert request('/store/domain-fixture/cart', 'shop.example.test')[0] == 200
 assert request('/')[0] == 200
 
 assert request('/', 'system.example.test')[:2] == (302, '/sistema/domain-fixture')
-assert request('/api/system/domain-fixture/session', 'system.example.test')[0] == 401
-status, _, text = request('/sistema/domain-fixture/login', 'system.example.test')
+status, _, text = request('/api/system/domain-fixture/session', 'system.example.test')
 assert status == 200
-assert request('/sistema/domain-fixture/login', 'system.example.test', {'pin': '9876', '_csrf': csrf(text)})[0] in (302, 303)
+anonymous = json.loads(text)['data']
+assert anonymous['user'] is None
+status, _, text = request('/sistema/domain-fixture/login', 'system.example.test')
+assert status in (302, 303)
+assert _ == '/sistema/domain-fixture/#/login'
+assert request('/api/system/domain-fixture/runtime', 'system.example.test', json_data={'action': 'db/getAll', 'data': {'tabla': 'usuarios'}}, csrf=anonymous['csrf'])[0] == 401
+status, _, text = request('/api/system/domain-fixture/runtime', 'system.example.test', json_data={'action': 'invoke', 'data': {'channel': 'auth:login', 'args': [{'mode': 'pin', 'pin': '9876'}]}}, csrf=anonymous['csrf'])
+assert status == 200 and json.loads(text)['success'] is True
 status, _, text = request('/sistema/domain-fixture', 'system.example.test')
 assert status == 200 and 'type="module"' in text
 status, _, text = request('/api/system/domain-fixture/session', 'system.example.test')
@@ -70,4 +76,4 @@ assert request(url, data={'store_domain': 'changed.example.test', 'enable_system
 text = request(url)[2]
 assert 'sistema.changed.example.test' in text and 'DNS pendiente' in text
 assert request('/', 'shop.example.test')[0] == 404, 'Retired domain must not expose admin'
-print('PASS: store root/cart, system PIN/session/runtime, domain UI, default subdomain, CSRF and cross-project isolation')
+print('PASS: store root/cart, app login/session/runtime, domain UI, default subdomain, CSRF and cross-project isolation')
