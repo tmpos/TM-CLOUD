@@ -672,6 +672,9 @@ final class SystemRuntimeService
                         || (($warehouseUid === '' || $rowUid === '') && !empty($factura['almacen_id']) && !empty($current['almacen_id']) && (int) $factura['almacen_id'] !== (int) $current['almacen_id'])) {
                         throw new RuntimeException('El producto pertenece a otro almacen.');
                     }
+                    if ($tableName === 'accesorios' && (int) ($current['vender_sin_stock'] ?? 0) === 1) {
+                        continue;
+                    }
                     // La condicion cantidad>=? evita vender mas de lo disponible en
                     // una sola sentencia; el aviso de realtime solo se emite si de
                     // verdad desconto algo (comportamiento previo conservado).
@@ -1112,6 +1115,9 @@ final class SystemRuntimeService
         }
         if (!$this->hasColumn($db, $table, 'valor_comision')) {
             $db->exec('ALTER TABLE accesorios ADD COLUMN valor_comision REAL DEFAULT 0');
+        }
+        if (!$this->hasColumn($db, $table, 'vender_sin_stock')) {
+            $db->exec('ALTER TABLE accesorios ADD COLUMN vender_sin_stock INTEGER NOT NULL DEFAULT 0');
         }
     }
     // Tablas como "colores" o "capacidad" existen en el SQLite local de cada

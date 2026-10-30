@@ -25,6 +25,9 @@
 </form>
 <script>
 const pin=document.getElementById('pin'),submit=document.getElementById('submit');
+const offlinePinKey=<?= json_encode('tmpos-pwa-pending-pin:' . rawurlencode($slug), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+sessionStorage.removeItem(offlinePinKey);
+document.getElementById('pin-form').addEventListener('submit',()=>sessionStorage.setItem(offlinePinKey,pin.value));
 const sync=()=>{pin.value=pin.value.replace(/\D/g,'').slice(0,4);submit.disabled=pin.value.length!==4};
 pin.addEventListener('input',sync);
 document.querySelectorAll('[data-number]').forEach(button=>button.addEventListener('click',()=>{if(pin.value.length<4)pin.value+=button.dataset.number;sync();pin.focus()}));

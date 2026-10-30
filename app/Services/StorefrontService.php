@@ -1445,7 +1445,9 @@ final class StorefrontService
         if ($images === [] && trim($fallbackImage) !== '') {
             $images = [$fallbackImage];
         }
-        $stock = $map['stock'] ? (float) ($row[$map['stock']] ?? 0) : null;
+        $stock = (int) ($row['vender_sin_stock'] ?? 0) === 1
+            ? null
+            : ($map['stock'] ? (float) ($row[$map['stock']] ?? 0) : null);
         $rawPrice = $map['price'] ? ($row[$map['price']] ?? null) : null;
         $rawComparePrice = $map['compare_price'] ? ($row[$map['compare_price']] ?? null) : null;
         $price = $rawPrice === null || $rawPrice === '' ? null : (float) $rawPrice;

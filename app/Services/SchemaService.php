@@ -11,6 +11,7 @@ use RuntimeException;
 
 final class SchemaService
 {
+    private static array $stockExemptionChecked = [];
     public const PROTECTED = ['id', 'uid', 'created_at', 'updated_at'];
     public const TYPES = ['TEXT', 'INTEGER', 'REAL', 'BOOLEAN', 'DATE', 'DATETIME', 'JSON', 'EMAIL', 'PHONE', 'URL', 'FILE', 'IMAGE'];
 
@@ -20,7 +21,20 @@ final class SchemaService
 
     public function connection(array $project): PDO
     {
-        return Database::connect($project['database_path']);
+        $path = (string) $project['database_path'];
+        $db = Database::connect($path);
+        if (!isset(self::$stockExemptionChecked[$path])) {
+            $table = $db->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='accesorios' LIMIT 1")->fetchColumn();
+            if ($table) {
+                $columns = array_column($db->query('PRAGMA table_info("accesorios")')->fetchAll(), 'name');
+                if (!in_array('vender_sin_stock', $columns, true)) {
+                    $db->exec('ALTER TABLE accesorios ADD COLUMN vender_sin_stock INTEGER NOT NULL DEFAULT 0');
+                    @unlink(dirname($path) . '/schema_cache.json');
+                }
+            }
+            self::$stockExemptionChecked[$path] = true;
+        }
+        return $db;
     }
 
     public function tables(array $project): array
