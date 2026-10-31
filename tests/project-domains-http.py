@@ -43,6 +43,10 @@ assert request('/store/domain-fixture/cart', 'shop.example.test')[0] == 200
 assert request('/')[0] == 200
 
 assert request('/', 'system.example.test')[:2] == (302, '/sistema/domain-fixture')
+assert request('/sistema/custom-fixture')[0] in (302, 303)
+custom_status, _, custom_login = request('/sistema/custom-fixture/login')
+assert custom_status == 200 and 'name="_csrf"' in custom_login
+assert request('/api/system/custom-fixture/session')[0] == 401
 status, _, text = request('/api/system/domain-fixture/session', 'system.example.test')
 assert status == 200
 anonymous = json.loads(text)['data']

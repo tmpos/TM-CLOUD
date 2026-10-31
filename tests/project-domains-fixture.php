@@ -12,6 +12,11 @@ $auth->install('Domain test', 'domains@example.test', 'Disposable-domain-test-20
 $logs = new \App\Services\LogService($db);
 $projects = new \App\Services\ProjectService($db, $config, $logs);
 $project = $projects->create(['name' => 'Domain Fixture', 'slug' => 'domain-fixture']);
+$customApp = $config['root'] . '/public/system-apps/fixture-custom';
+if (!is_dir($customApp)) mkdir($customApp, 0775, true);
+file_put_contents($customApp . '/index.html', '<!doctype html><html><head></head><body>Custom fixture</body></html>');
+$customProject = $projects->create(['name' => 'Custom Fixture', 'slug' => 'custom-fixture']);
+$projects->setSystemApp($customProject['uid'], 'fixture-custom');
 $schema = new \App\Services\SchemaService($projects, $logs);
 $connection = $schema->connection($project);
 $connection->exec("CREATE TABLE usuarios(id INTEGER PRIMARY KEY,uid TEXT,nombre TEXT,usuario TEXT,pin TEXT,estado TEXT,rol TEXT,nivel_seguridad TEXT,permisos TEXT)");

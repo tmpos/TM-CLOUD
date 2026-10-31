@@ -71,7 +71,12 @@ final class SystemController
         Flight::route('GET /sistema/@slug/login', function ($slug): void {
             try {
                 $project = $this->projectBySlug((string) $slug);
-                Flight::redirect('/sistema/' . rawurlencode((string) $project['slug']) . '/#/login');
+                if ($this->isPosProject($project)) {
+                    Flight::redirect('/sistema/' . rawurlencode((string) $project['slug']) . '/#/login');
+                    return;
+                }
+                if ($this->systemUser($project)) { Flight::redirect('/sistema/' . rawurlencode((string) $project['slug'])); return; }
+                $this->render('system-project-login', ['title' => $project['name'], 'project' => $project], false);
             } catch (\Throwable $e) {
                 http_response_code($e->getCode() === 404 ? 404 : 400);
                 $this->render('system-project-login', ['title' => 'Sistema no disponible', 'error' => $e->getMessage()], false);
@@ -106,6 +111,10 @@ final class SystemController
             try {
                 $project = $this->projectBySlug((string) $slug);
                 $app = $this->systemApps->find((string) ($project['system_app'] ?? 'default'));
+                if (empty($app['is_default']) && !$this->systemUser($project)) {
+                    Flight::redirect('/sistema/' . rawurlencode((string) $project['slug']) . '/login');
+                    return;
+                }
                 $file = (string) $app['path'] . DIRECTORY_SEPARATOR . 'index.html';
                 if (!is_file($file)) throw new \RuntimeException('La interfaz TMPOS no esta publicada.', 404);
                 $html = (string) file_get_contents($file);
@@ -263,7 +272,9 @@ final class SystemController
         try {
             $project = $this->projectBySlug($slug);
             $systemUser = $this->systemUser($project);
-            if ($requireUser && !$systemUser) throw new \RuntimeException('La sesion expiro.', 401);
+            if (!$systemUser && ($requireUser || !$this->isPosProject($project))) {
+                throw new \RuntimeException('La sesion expiro.', 401);
+            }
             $callback($project, $systemUser);
         } catch (\Throwable $e) {
             $status = in_array($e->getCode(), [401, 403, 404, 409, 422, 423], true) ? $e->getCode() : 400;
@@ -274,6 +285,11 @@ final class SystemController
     private function projectBySlug(string $slug): array
     {
         return $this->projects->findActiveBySlug(Support::slug($slug));
+    }
+
+    private function isPosProject(array $project): bool
+    {
+        return (string) ($project['system_app'] ?? 'default') === 'default';
     }
 
     private function systemUser(array $project): ?array
